@@ -13,12 +13,6 @@ from planner import (build_row,client_plan,fixed_pp_client_plan,vendor_plan,
 warnings.filterwarnings("ignore",category=UserWarning)
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
-# helper for any client using the "tekion_2group" vendor MG method
-def _two_group_fv(results,is_nv,nv_cat,L):
-    nv,st2,rest=classify(results,nv_cat,L.star_categories)
-    raw=(gavg(st2)+gavg(rest))/2
-    return raw if is_nv else max(L.adjust_vendor_mg(raw),0)
-
 # ═══════════════ CLIENT SELECTOR ═══════════════
 st.title("Per Pax Quantity & Production Plan Prediction")
 sel=st.selectbox("Select Client",CLIENT_LIST,key="client_sel")
@@ -215,3 +209,8 @@ if st.button("Predict"):
         st.success(f"🎯 Adjusted Vendor MG: **{vmg_sd:.2f}**")
 
 
+# helper for any client using the "tekion_2group" vendor MG method
+def _two_group_fv(results,is_nv,nv_cat,L):
+    nv,st2,rest=classify(results,nv_cat,L.star_categories)
+    raw=(gavg(st2)+gavg(rest))/2
+    return raw if is_nv else max(L.adjust_vendor_mg(raw),0)
