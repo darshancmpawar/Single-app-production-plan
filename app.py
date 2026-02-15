@@ -186,7 +186,7 @@ if st.button("Predict"):
         # ── AGGRESSIVE PLAN ──
         if L.has_aggressive_plan:
             if L.vendor_mg_method=="tekion_2group":
-                fv,_=classify(results,nv_cat,L.star_categories); fv_mg=_tekion_fv(results,is_nv,nv_cat,L)
+                fv_mg=_two_group_fv(results,is_nv,nv_cat,L)
                 avg_nv=gavg([r for r in results if cats_match(r["Category"],nv_cat)])
                 ag,at,an,av=aggressive_plan(vp,results,fv_mg,avg_nv,is_nv,nv_cat,L,method_groups=2)
             elif L.vendor_mg_method in ("3group","day_based"):
@@ -209,8 +209,8 @@ if st.button("Predict"):
         st.success(f"🎯 Adjusted Vendor MG: **{vmg_sd:.2f}**")
 
 
-# helper for tekion aggressive plan
-def _tekion_fv(results,is_nv,nv_cat,L):
+# helper for any client using the "tekion_2group" vendor MG method
+def _two_group_fv(results,is_nv,nv_cat,L):
     nv,st2,rest=classify(results,nv_cat,L.star_categories)
     raw=(gavg(st2)+gavg(rest))/2
     return raw if is_nv else max(L.adjust_vendor_mg(raw),0)
