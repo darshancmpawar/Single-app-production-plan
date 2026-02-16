@@ -134,11 +134,30 @@ class ClarioLogic(BaseLogic):
     @property
     def encoder_columns(self): return ["weekday","menu_items","sub_category","category","meal_day"]
     @property
-    def fixed_categories(self): return ["Flavoured Rice","Indian Bread","White Rice","Healty Rice","Veg Dry","Veg Gravy","Dal","Sambar/Rasam"]
+    def fixed_categories(self): return ["Flavoured Rice","Indian Bread","White Rice","Healthy Rice","Veg Dry","Veg Gravy","Dal","Sambar/Rasam"]
     @property
     def star_categories(self): return {"flavoured rice","veg gravy"}
     @property
-    def category_map(self): return {"indian bread":"indian bread","indian breads":"indian bread","veg dry":"veg dry","veg curry":"veg gravy","gravy veg":"veg gravy","veg gravy":"veg gravy","healty rice":"healty rice","flavour rice":"flavoured rice","flavoured rice":"flavoured rice","white rice":"white rice","steamed rice":"white rice","dal":"dal","sambar":"sambar/rasam","sambar/rasam":"sambar/rasam","rasam":"sambar/rasam"}
+    def category_map(self): 
+        return {
+            "indian bread":"indian bread",
+            "indian breads":"indian bread",
+            "veg dry":"veg dry",
+            "veg curry":"veg gravy",
+            "gravy veg":"veg gravy",
+            "veg gravy":"veg gravy",
+            "healty rice":"healthy rice",   # typo alias
+            "healthy rice":"healthy rice",  # correct form
+            "flavour rice":"flavoured rice",
+            "flavoured rice":"flavoured rice",
+            "white rice":"white rice",
+            "steamed rice":"white rice",
+            "dal":"dal",
+            "sambar":"sambar/rasam",
+            "sambar/rasam":"sambar/rasam",
+            "rasam":"sambar/rasam",
+        }
+
     @property
     def has_vendor_plan(self): return False
     @property
