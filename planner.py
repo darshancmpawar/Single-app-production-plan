@@ -79,14 +79,17 @@ def vendor_plan(df, results, cmg, is_nv, nv_cat, logic, weekday=None):
         vp=vp[["Category","Item","Vendor PP","Ordered Qty"]]
         return vp,vmg,0
     elif method=="day_based":
-        raw=_day_vendor_mg(cmg,weekday,logic); vmg=mg5(raw)
+        raw = _day_vendor_mg(cmg, weekday, logic)
+        vmg = max(5, mg5(raw))  # prevent zero/negative MG
+
         # For day_based, Vendor PP = total_qty / vendor_mg
-        vp=df.copy()
-        vp["Vendor PP"]=vp["Total Qty"].apply(lambda tq: r005(tq/vmg) if vmg>0 else 0)
-        vp["Ordered Qty"]=(vp["Vendor PP"]*vmg).round(1)
-        vp["Ordered Qty"]=vp.apply(lambda r:max(r["Ordered Qty"],r["Total Qty"]),axis=1)
-        vp=vp[["Category","Item","Vendor PP","Ordered Qty"]]
-        return vp,vmg,0
+        vp = df.copy()
+        vp["Vendor PP"] = vp["Total Qty"].apply(lambda tq: r005(tq / vmg))
+        vp["Ordered Qty"] = (vp["Vendor PP"] * vmg).round(1)
+        vp["Ordered Qty"] = vp.apply(lambda r: max(r["Ordered Qty"], r["Total Qty"]), axis=1)
+        vp = vp[["Category", "Item", "Vendor PP", "Ordered Qty"]]
+        return vp, vmg, 0
+
     return df,0,0
 
 # ── aggressive plan builder ──
@@ -94,15 +97,24 @@ def aggressive_plan(vplan, results, final_vmg, avg_nv, is_nv, nv_cat, logic, met
     eff=set(logic.star_categories)
     if nv_cat: eff.add(norm(nv_cat))
     ag=vplan.copy()
-    ag["Ordered Qty"]=ag.apply(lambda r:logic.aggressive_bump(r["Ordered Qty"]) if norm(r["Category"]) in eff else r["Ordered Qty"],axis=1).round(1)
-    ag["AMG"]=ag["Ordered Qty"]/ag["Vendor PP"]
+    ag["Ordered Qty"]=ag.apply(
+        lambda r: logic.aggressive_bump(r["Ordered Qty"]) if norm(r["Category"]) in eff else r["Ordered Qty"],
+        axis=1
+    ).round(1)
+
+    def _safe_div(a, b):
+        return (a / b) if (b is not None and b > 0) else 0
+
+    ag["AMG"] = ag.apply(lambda r: _safe_div(r["Ordered Qty"], r["Vendor PP"]), axis=1)
 
     if nv_cat:
-        nva=ag[ag["Category"].notna()&ag["Category"].str.strip().str.lower().eq(norm(nv_cat))]
+        nva=ag[ag["Category"].notna() & ag["Category"].str.strip().str.lower().eq(norm(nv_cat))]
     else:
         nva=pd.DataFrame(columns=ag.columns)
+
     sta=ag[ag["Category"].str.lower().str.strip().isin(logic.star_categories)]
-    rsa=ag[~ag.index.isin(nva.index)&~ag.index.isin(sta.index)]
+    rsa=ag[~ag.index.isin(nva.index) & ~ag.index.isin(sta.index)]
+
     def _m(d): return d["AMG"].mean() if not d.empty else 0
 
     if method_groups==2:
@@ -113,16 +125,30 @@ def aggressive_plan(vplan, results, final_vmg, avg_nv, is_nv, nv_cat, logic, met
         iam=(_m(nva)+_m(sta)+_m(rsa))/3
         diff=iam-final_vmg; adj_t=final_vmg-diff; adj_nv=0
 
-    adj_t=mg5(adj_t); adj_nv=mg5(adj_nv); adj_v=adj_t-adj_nv
+    # guards
+    adj_t = max(0, adj_t)
+    adj_nv = max(0, adj_nv)
+
+    adj_t = mg5(adj_t)
+    adj_nv = mg5(adj_nv)
+
+    if adj_nv > adj_t:
+        adj_nv = adj_t
+
+    adj_v = adj_t - adj_nv
 
     def _rb(r):
         c=norm(r["Category"])
-        if is_nv and nv_cat and c==norm(nv_cat): base=adj_nv
-        else: base=adj_t
-        return r005(r["Ordered Qty"]/base) if base else 0
+        if is_nv and nv_cat and c==norm(nv_cat):
+            base=adj_nv
+        else:
+            base=adj_t
+        return r005(_safe_div(r["Ordered Qty"], base))
+
     ag["Vendor PP"]=ag.apply(_rb,axis=1)
     ag=ag[["Category","Item","Vendor PP","Ordered Qty"]]
     return ag,adj_t,adj_nv,adj_v
+
 
 # ── special day ──
 def special_day_mg(cmg,dt,ht,wd,logic):
