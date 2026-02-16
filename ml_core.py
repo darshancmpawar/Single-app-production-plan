@@ -55,7 +55,10 @@ def load_map(ck,n): return _lc(f"{ck}:m:{n}", lambda: joblib.load(_ap(ck,f"{n}.p
 
 def encode_safe(le, v, d=0):
     v = token(v)
-    cl = set(getattr(le, "classes_", []))
+    cl = getattr(le, "_classes_set", None)
+    if cl is None:
+        cl = set(getattr(le, "classes_", []))
+        setattr(le, "_classes_set", cl)
     if v in cl:
         return int(le.transform([v])[0])
     if "other" in cl:
@@ -144,7 +147,6 @@ def train_model(ck, path, logic, verbose=0):
         df[c] = df[c].map(token).astype(str)
 
     df["weekday"] = df["date"].dt.day_name().map(norm)
-    df["menu_items_list"] = df.groupby("date")["menu_items"].transform(list)
 
 
     # fill missing optional encoder columns
@@ -175,7 +177,19 @@ def train_model(ck, path, logic, verbose=0):
     # context
     i2i={it:ix for ix,it in enumerate(le_map["menu_items"].classes_)}
     pad=len(i2i)
-    df["ctx"]=df["menu_items_list"].map(lambda ml:[i2i[i] for i in ml if i in i2i][:CTX_LEN]+[pad]*(CTX_LEN-len([i2i[i] for i in ml if i in i2i][:CTX_LEN])))
+    per_date_items = df.groupby("date")["menu_items"].apply(list)
+
+    def _ctx_for_row(row):
+        current_item = row["menu_items"]
+        idxs = [
+            i2i[item]
+            for item in per_date_items[row["date"]]
+            if item in i2i and item != current_item
+        ]
+        truncated = idxs[:CTX_LEN]
+        return truncated + [pad] * (CTX_LEN - len(truncated))
+
+    df["ctx"] = df[["date", "menu_items"]].apply(_ctx_for_row, axis=1)
 
     # non-menu feature columns in order
     extra_cols=[c for c in logic.encoder_columns if c!="menu_items"]
@@ -205,6 +219,8 @@ def train_model(ck, path, logic, verbose=0):
             idx = np.arange(len(df))
             rng.shuffle(idx)
             cut = max(1, int(round(len(idx) * (1 - TEST_SIZE))))
+            if cut >= len(idx):
+                cut = len(idx) - 1
             tr_idx, te_idx = idx[:cut], idx[cut:]
             Xtr = [arr[tr_idx] for arr in X]
             Xte = [arr[te_idx] for arr in X]
@@ -219,10 +235,19 @@ def train_model(ck, path, logic, verbose=0):
         rng = np.random.RandomState(SEED)
         rng.shuffle(idx)
         cut = max(1, int(round(len(idx) * (1 - TEST_SIZE))))
+        if cut >= len(idx):
+            cut = len(idx) - 1
         tr_idx, te_idx = idx[:cut], idx[cut:]
         Xtr = [arr[tr_idx] for arr in X]
         Xte = [arr[te_idx] for arr in X]
         ytr, yte = y[tr_idx], y[te_idx]
+
+    # Ensure at least one sample exists in each split for fit/eval.
+    if len(ytr) == 0 or len(yte) == 0:
+        raise ValueError(
+            f"[{ck}] Not enough rows ({len(df)}) to produce both train and test splits. "
+            "Need at least 2 valid rows."
+        )
 
 
     # dynamic model
@@ -262,7 +287,11 @@ def predict(ck, item, menu, mg, subcat, cat, weekday, logic, day_type=None, holi
     extra_cols=[c for c in logic.encoder_columns if c!="menu_items"]
 
     t=(item or "").strip(); mi=[(i or "").strip() for i in menu]
-    known=set(ile.classes_); pad=len(ile.classes_)
+    known=getattr(ile, "_classes_set", None)
+    if known is None:
+        known = set(ile.classes_)
+        setattr(ile, "_classes_set", known)
+    pad=len(ile.classes_)
     t=resolve_ci(t,known)
 
     fb=False; fi=None
@@ -285,9 +314,10 @@ def predict(ck, item, menu, mg, subcat, cat, weekday, logic, day_type=None, holi
           "holiday_type":logic.canonicalize_holiday_type(holiday_type or "not applicable"),
           "meal_day":logic.canonicalize_meal_day(meal_day or "veg")}
 
+    encoder_lookup = {c: load_enc(ck, c) for c in extra_cols}
     feed=[np.array([idx]), np.array([padded])]
     for c in extra_cols:
-        le=load_enc(ck,c)
+        le=encoder_lookup[c]
         feed.append(np.array([encode_safe(le,vals.get(c,""))]))
 
     raw=mdl.predict(feed,verbose=0)[0][0]
