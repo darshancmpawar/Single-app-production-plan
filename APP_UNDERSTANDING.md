@@ -1,90 +1,279 @@
-# App Understanding (ML + Embeddings View)
+# App Understanding
 
-## What this app does
-This is a **Streamlit application** that predicts **per-pax quantity (PP)** and builds downstream:
-- Client production plans
-- Vendor production plans
-- Aggressive vendor plans (for selected clients)
+## Overview
+This Streamlit app predicts **per-pax quantity (PP)** for cafeteria menu items and builds operational plans for selected clients:
 
-The system is **multi-tenant by client**. Each client gets its own:
-- dataset
-- feature schema
-- trained embedding model artifacts
-- business rules for planning
+- Client Production Plan
+- Vendor Production Plan
+- Aggressive Vendor Plan
+- Special Day MG adjustment
 
-## End-to-end flow
-1. User selects a client in the Streamlit UI.
-2. The app loads a client-specific `Logic` object that defines features and business rules.
-3. If model artifacts are missing, the app trains a TensorFlow embedding model for that client.
-4. User enters date + menu items (+ optional non-veg context and special-day metadata).
-5. For each item, the app predicts per-pax and total quantity.
-6. Planner functions convert predictions into client/vendor/aggressive plans.
+The app is **multi-client** and client behavior is controlled by configuration + logic classes.
 
-## Embeddings architecture
-The model in `ml_core.py` is a **dynamic multi-input embedding network**:
-- Primary item embedding (`menu_items`)
-- Context embedding over up to 10 other menu items (`ctx`, average pooled)
-- Additional categorical embeddings based on `encoder_columns` (e.g., `sub_category`, `category`, `weekday`, `day_type`, `holiday_type`, `meal_day`)
+---
 
-Dense head:
-- Concatenate all embeddings
-- Dense(64, relu) -> Dropout(0.3) -> Dense(32, relu) -> Dense(1)
+## File Responsibilities
 
-Prediction output:
-- `ideal_pp` regression
-- Rounded down to nearest `0.005`
+## `app.py`
+UI orchestration and runtime flow:
+- client selection
+- artifact check and on-demand training
+- input collection (date, day metadata, menu items, non-veg options)
+- predictions
+- plan generation and display
+
+## `client_database.py`
+Client registry:
+- display name
+- dataset path
+- lookup helpers
+
+## `client_logic.py`
+Per-client behavior model:
+- model feature schema
+- category canonicalization
+- non-veg behavior
+- vendor MG method
+- special-day reduction policy
+- optional fixed PP map
+
+## `ml_core.py`
+Model training + inference:
+- dynamic embedding model based on `encoder_columns`
+- encoder/map artifact generation
+- fallback inference for unseen items
+- client-prefixed artifact loading
+
+## `planner.py`
+Operational math layer:
+- PP/qty row building
+- client plan
+- vendor plan across multiple MG methods
+- aggressive plan
+- special-day MG reduction
+
+---
+
+## Runtime Flow
+
+1. User selects a client.
+2. App resolves:
+   - client key (`CK`)
+   - client info (`INFO`)
+   - client logic (`L`)
+3. App validates mode consistency (`client_database` vs `client_logic`).
+4. If client is multiplier-only, app runs Toasttab branch and exits.
+5. Otherwise:
+   - verify model artifacts
+   - if missing, train model from dataset
+6. Load maps:
+   - item → sub_category
+   - item → category
+   - category → sub_categories
+7. Collect input:
+   - date/day/month
+   - day type + holiday type (if enabled)
+   - non-veg options (if enabled/applicable)
+   - category-wise menu items
+8. Predict each item PP + total quantity.
+9. Build and render plans:
+   - client plan
+   - vendor plan
+   - aggressive plan (if enabled)
+10. Optional independent Special Day button computes adjusted vendor MG.
+
+---
+
+## Client Mode Matrix
+
+## Tekion
+- Embedding model
+- Non-veg toggle
+- Vendor plan enabled
+- Aggressive plan enabled
+- Special day enabled
+- Vendor MG method: `tekion_2group`
+- Separate non-veg MG track
+
+## Clario
+- Embedding model
+- Client plan only
+- Vendor plan disabled
+- Aggressive plan disabled
+- Special day disabled
+
+## Odessia
+- Embedding model
+- Non-veg section without toggle
+- Vendor plan enabled
+- Aggressive plan enabled
+- Special day enabled
+- Vendor MG method: `3group`
+- Fixed PP map enabled
+
+## Rippling
+- Embedding model
+- Vendor plan enabled
+- Aggressive plan enabled
+- Special day enabled
+- Vendor MG method: `3group`
+- Uses display categories for North/South Veg dry
+
+## Stripe
+- Embedding model
+- Two non-veg inputs
+- Vendor plan enabled
+- Aggressive plan enabled
+- Special day enabled
+- Vendor MG method: `day_based`
+
+## Tessolve
+- Embedding model
+- Client plan only
+- Vendor/aggressive/special day disabled
+
+## Toasttab
+- Multiplier-only path
+- No ML artifacts or prediction model
+
+---
+
+## Input State Model
+
+The app uses **client-namespaced Streamlit keys**:
+- prevents stale widget state leakage when switching clients
+- format: `"{client_key}::{widget_name}"`
+
+Menu entries are normalized into a single dict schema:
+
+- `item`
+- `subcat`
+- `category` (canonical/internal)
+- `mg`
+- `display_category`
+- `needs_shared_mg`
+
+This avoids tuple-shape mismatches and simplifies downstream logic.
+
+---
+
+## Model Architecture
+
+The prediction model is a dynamic, multi-input embedding regressor:
+
+Inputs:
+- target item id (`menu_items`)
+- context items (`ctx`, up to 10 items)
+- extra categorical features from `encoder_columns`
+
+Embedding pattern:
+- target item embedding + flatten
+- context embedding + average pooling
+- embedding per extra categorical feature
+- concatenate all embeddings
+
+Head:
+- Dense(64, relu)
+- Dropout(0.3)
+- Dense(32, relu)
+- Dense(1)
+
+Output:
+- predicted `ideal_pp`
+- post-processed with flooring to 0.005 granularity
 - `total_qty = per_pax * mg`
 
-## Artifact strategy
-Artifacts are client-prefixed and cached in-memory:
+---
+
+## Artifact Strategy
+
+Artifacts are client-prefixed and stored in artifact directory:
+
 - `<client>_per_pax_tf_model.keras`
 - `<client>_<feature>_encoder.pkl`
 - `<client>_item_to_subcat.pkl`
 - `<client>_item_to_cat.pkl`
 - `<client>_cat_to_subs.pkl`
 
-This enables independent model lifecycles per client.
+This enables isolated lifecycle per client.
 
-## Client customization model
-`client_logic.py` encapsulates configuration and rules via subclasses of `BaseLogic`.
-Each client can override:
-- feature schema (`encoder_columns`)
-- UI category set (`fixed_categories`)
-- vendor MG method (`tekion_2group`, `3group`, `day_based`, or none)
-- non-veg behavior, fixed PP, aggressive bump, special-day reductions
+---
 
-Supported client patterns currently include:
-- Full embedding + vendor + aggressive plans (e.g., Tekion/Clario)
-- Embedding + fixed PP client plan (Odessia)
-- Embedding + day-based vendor MG (Stripe)
-- Embedding with client-plan-only (Tessolve)
-- Non-ML multiplier-only mode (Toasttab)
+## Fallback and Robustness
 
-## Planner logic summary
-`planner.py` transforms predicted rows into operational plans:
-- `client_plan`: direct PP/qty presentation
-- `fixed_pp_client_plan`: static PP map regardless of prediction
-- `vendor_plan`: computes vendor MG and ordered quantity per client method
-- `aggressive_plan`: additional strategic bumping for priority categories
-- `special_day_mg`: holiday/day-type reduction factor
+## Unseen item handling
+If item is not in menu-item encoder:
+- app attempts fallback using same sub-category item from known classes
+- if unavailable, returns a clear skip error
 
-## Data assumptions
-Training datasets are Excel files and normalized to lowercase snake-case columns.
-Expected columns vary by client logic but generally include:
-- `date`, `menu_items`, `sub_category`, `category`, `ideal_pp`
-- optional: `day_type`, `holiday_type`, `meal_day`, `meal_type`
+## Dataset safety
+Before training:
+- app checks dataset path exists
+- clear UI error shown if missing
 
-## Technical observations (senior ML notes)
-- The architecture is practical for tabular categorical regression with menu-context effects.
-- Unknown item fallback by sub-category is implemented, which improves robustness.
-- Training-on-demand in UI is convenient but should eventually move to offline pipelines for production latency control.
-- LabelEncoder is functional, but explicit OOV buckets during training could make unknown handling more principled.
-- Artifact namespacing by client is a strong multi-tenant design choice.
+## Config safety
+- app validates mode mismatch between DB and logic
+- fails fast with explicit message
 
-## Recommended next production upgrades
-1. Offline training jobs + model registry/versioning per client.
-2. Add evaluation reports per client/day-type slice (not only RMSE).
-3. Introduce feature/data drift checks and input schema validation.
-4. Persist prediction logs for feedback loops and re-training triggers.
-5. Replace implicit fallback with confidence-aware fallback policy.
-6. Add automated tests for planner edge cases and OOV handling.
+---
+
+## Planning Logic Summary
+
+## Client plan
+- standard: uses predicted PP and qty
+- fixed-PP mode: uses client-defined PP map and recomputed qty
+
+## Vendor plan methods
+- `tekion_2group`
+  - uses star + rest grouping, optional non-veg separation, tier adjustments, floor ratio
+- `3group`
+  - averages non-veg + star + rest, then adjustment
+- `day_based`
+  - derives MG from weekday reduction
+
+## Aggressive plan
+- bumps ordered qty for effective priority categories
+- recalculates derived Vendor PP with adjusted MG outputs
+
+## Special day MG
+- button-driven computation from day type + holiday type + weekday matrix
+
+---
+
+## Current UI Behavior Notes
+
+- Special Day button is independent from Predict button.
+- Non-veg behavior supports:
+  - toggle clients
+  - no-toggle clients with forced non-veg section
+  - multiple non-veg rows where configured
+
+---
+
+## Data Expectations
+
+Typical dataset columns:
+- `date`
+- `menu_items`
+- `sub_category`
+- `category`
+- `ideal_pp`
+
+Optional by client:
+- `day_type`
+- `holiday_type`
+- `meal_day`
+- `meal_type`
+
+All columns are normalized to lowercase snake case in loading pipeline.
+
+---
+
+## Recommended Next Production Upgrades
+
+1. Move training to offline jobs and deploy versioned models.
+2. Add date-group evaluation reports by slice (weekday/day-type/client).
+3. Add schema contract tests per client.
+4. Log prediction inputs/outputs for monitoring and retraining.
+5. Add confidence scoring for fallback predictions.
+6. Add unit tests for planner edge cases and MG safety boundaries.
