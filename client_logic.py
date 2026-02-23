@@ -13,6 +13,7 @@ TO ADD A CLIENT WITH DIFFERENT LOGIC:  subclass, override, add to LOGIC_REGISTRY
 import math
 from abc import ABC, abstractmethod
 from ml_core import norm
+from Logic_Definer import load_logic_overrides
 
 # ═══════════════════════════════════════════════════════════════════════
 # Base contract
@@ -299,6 +300,38 @@ class ToasttabLogic(BaseLogic):
         elif c<55: return c
         else: return c-5
 
+
+
+class _LogicOverrideProxy:
+    def __init__(self, base, override):
+        self._base = base
+        self._override = override or {}
+
+    @property
+    def fixed_categories(self):
+        return self._override.get("menu_categories") or self._base.fixed_categories
+
+    @property
+    def star_categories(self):
+        values = self._override.get("star_categories")
+        return set(values) if values else self._base.star_categories
+
+    @property
+    def custom_nonveg_mode(self):
+        return self._override.get("nonveg_mode", "Optional")
+
+    @property
+    def slab_adjustments(self):
+        return self._override.get("slab_adjustments", [])
+
+    @property
+    def additional_requirements(self):
+        return self._override.get("additional_requirements", "")
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # REGISTRY — map client keys to logic classes
 # Same logic? Just point to the same class.
@@ -314,6 +347,9 @@ LOGIC_REGISTRY = {
 }
 
 def get_logic(ck):
-    cls=LOGIC_REGISTRY.get(ck.strip().lower())
+    key = ck.strip().lower()
+    cls = LOGIC_REGISTRY.get(key)
     if not cls: raise ValueError(f"No logic for '{ck}'. Available: {sorted(LOGIC_REGISTRY)}")
-    return cls()
+    base = cls()
+    override = load_logic_overrides().get(key, {})
+    return _LogicOverrideProxy(base, override)
