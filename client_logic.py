@@ -316,12 +316,32 @@ class _LogicOverrideProxy:
         return set(values) if values else self._base.star_categories
 
     @property
+    def mode(self):
+        return self._override.get("mode", "Embedded")
+
+    @property
+    def has_embeddings(self):
+        return self.mode == "Embedded"
+
+    @property
     def custom_nonveg_mode(self):
         return self._override.get("nonveg_mode", "Optional")
 
     @property
+    def nonveg_item_count(self):
+        return int(self._override.get("nonveg_item_count", self._base.nonveg_item_count) or self._base.nonveg_item_count)
+
+    @property
     def slab_adjustments(self):
         return self._override.get("slab_adjustments", [])
+
+    @property
+    def category_repeats(self):
+        return self._override.get("category_repeats", [])
+
+    @property
+    def calculation_config(self):
+        return self._override.get("calculation_config", {})
 
     @property
     def additional_requirements(self):
@@ -357,8 +377,10 @@ LOGIC_REGISTRY = {
 
 def get_logic(ck):
     key = ck.strip().lower()
-    cls = LOGIC_REGISTRY.get(key)
-    if not cls: raise ValueError(f"No logic for '{ck}'. Available: {sorted(LOGIC_REGISTRY)}")
-    base = cls()
     override = load_logic_overrides().get(key, {})
+    cls = LOGIC_REGISTRY.get(key)
+    if not cls:
+        mode = override.get("mode", "Embedded")
+        cls = ToasttabLogic if mode == "Calculation" else TekionLogic
+    base = cls()
     return _LogicOverrideProxy(base, override)

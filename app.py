@@ -73,81 +73,129 @@ with tab1:
         auto_slug = _slugify(client_name)
         st.text_input("Client Key (slug)", value=auto_slug, disabled=True, help="Auto-generated from Client Name")
 
-    c3, c4 = st.columns([1, 1])
-    with c3:
-        menu_categories = st.multiselect(
-            "Menu Category's",
-            options=[
-                "Flavour Rice", "Indian Bread", "White Rice", "Veg Dry", "Veg Curry", "Dal", "Sambar", "Rasam", "Salad",
-            ],
-            key="new_cfg_menu_categories",
-        )
-    with c4:
-        nonveg_mode = st.selectbox(
-            "Non-Veg Switch Required?",
-            ["Required", "Optional", "Not Needed"],
-            key="new_cfg_nonveg_mode",
-        )
-
-    c5, c6 = st.columns([1, 1])
-    with c5:
-        star_categories = st.multiselect(
-            "Star Item List",
-            options=menu_categories,
-            key="new_cfg_star_categories",
-        )
-    with c6:
-        use_custom_bump = st.toggle("Use custom bump %?", value=False, key="new_cfg_use_custom_bump")
-        st.selectbox("Existing bump profile", ["Default Logic", "Conservative", "Balanced", "Aggressive"], key="new_cfg_existing_bump")
-        custom_bump_pct = st.number_input(
-            "Custom Bump % (for aggressive plan)",
-            min_value=0.0,
-            max_value=100.0,
-            value=10.0,
-            step=0.5,
-            disabled=not use_custom_bump,
-            key="new_cfg_custom_bump_pct",
-            help="Enable toggle to override existing bump profile.",
-        )
-
-    additional_requirements = st.text_area(
-        "Another requirement input to configure a client",
-        key="new_cfg_additional_requirements",
-    )
+    config_mode = st.selectbox("Model Mode", ["Embedded", "Calculation"], key="new_cfg_model_mode")
 
     cfg = {
         "client_key": auto_slug,
         "client_name": client_name,
-        "menu_categories": menu_categories,
-        "nonveg_mode": nonveg_mode,
-        "star_categories": star_categories,
-        "additional_requirements": additional_requirements,
-        "custom_bump_pct": float(custom_bump_pct if use_custom_bump else 0.0),
+        "mode": config_mode,
     }
 
-    st.markdown("#### Slab wise adjustment")
-    slab_edit = st.data_editor(
-        pd.DataFrame(columns=["min_mg", "max_mg", "adjustment_pct"]),
-        num_rows="dynamic",
-        use_container_width=True,
-        key="new_cfg_slab_editor",
-    )
-    cfg["slab_adjustments"] = [
-        {
-            "min_mg": float(r["min_mg"]),
-            "max_mg": float(r["max_mg"]),
-            "adjustment_pct": float(r["adjustment_pct"]),
-        }
-        for _, r in slab_edit.dropna(subset=["min_mg", "max_mg", "adjustment_pct"]).iterrows()
-    ]
+    if config_mode == "Embedded":
+        c3, c4 = st.columns([1, 1])
+        with c3:
+            menu_categories = st.multiselect(
+                "Menu Category's",
+                options=[
+                    "Flavour Rice", "Indian Bread", "White Rice", "Veg Dry", "Veg Curry", "Dal", "Sambar", "Rasam", "Salad",
+                    "Non Veg Curry", "Non Veg Biryani", "Non Veg Dry"
+                ],
+                key="new_cfg_menu_categories",
+            )
+        with c4:
+            nonveg_mode = st.selectbox(
+                "Non-Veg Switch Required?",
+                ["Required", "Optional", "Not Needed"],
+                key="new_cfg_nonveg_mode",
+            )
+            nonveg_item_count = st.number_input("No. of Non-Veg items", min_value=0, max_value=5, value=1, step=1, key="new_cfg_nonveg_item_count")
+
+        c5, c6 = st.columns([1, 1])
+        with c5:
+            star_categories = st.multiselect(
+                "Star Item List",
+                options=menu_categories,
+                key="new_cfg_star_categories",
+            )
+        with c6:
+            use_custom_bump = st.toggle("Use custom bump %?", value=False, key="new_cfg_use_custom_bump")
+            st.selectbox("Existing bump profile", ["Default Logic", "Conservative", "Balanced", "Aggressive"], key="new_cfg_existing_bump")
+            custom_bump_pct = st.number_input(
+                "Custom Bump % (for aggressive plan)",
+                min_value=0.0,
+                max_value=100.0,
+                value=10.0,
+                step=0.5,
+                disabled=not use_custom_bump,
+                key="new_cfg_custom_bump_pct",
+                help="Enable toggle to override existing bump profile.",
+            )
+
+        st.markdown("#### Slab wise adjustment")
+        slab_edit = st.data_editor(
+            pd.DataFrame(columns=["min_mg", "max_mg", "adjustment_pct"]),
+            num_rows="dynamic",
+            use_container_width=True,
+            key="new_cfg_slab_editor",
+        )
+        slab_adjustments = [
+            {
+                "min_mg": float(r["min_mg"]),
+                "max_mg": float(r["max_mg"]),
+                "adjustment_pct": float(r["adjustment_pct"]),
+            }
+            for _, r in slab_edit.dropna(subset=["min_mg", "max_mg", "adjustment_pct"]).iterrows()
+        ]
+
+        st.markdown("#### Category occurrence setup")
+        repeat_df = st.data_editor(
+            pd.DataFrame(columns=["category", "count_in_menu"]),
+            num_rows="dynamic",
+            use_container_width=True,
+            key="new_cfg_category_repeat",
+        )
+        category_repeats = [
+            {"category": str(r["category"]).strip(), "count_in_menu": int(r["count_in_menu"])}
+            for _, r in repeat_df.dropna(subset=["category", "count_in_menu"]).iterrows()
+            if int(r["count_in_menu"]) > 1
+        ]
+
+        cfg.update({
+            "menu_categories": menu_categories,
+            "nonveg_mode": nonveg_mode,
+            "nonveg_item_count": int(nonveg_item_count),
+            "star_categories": star_categories,
+            "custom_bump_pct": float(custom_bump_pct if use_custom_bump else 0.0),
+            "slab_adjustments": slab_adjustments,
+            "category_repeats": category_repeats,
+        })
+    else:
+        st.info("Calculation mode (Toasttab-like): configure direct MG calculation settings.")
+        calc_c1, calc_c2 = st.columns([1, 1])
+        with calc_c1:
+            calc_default_mg = st.number_input("Default Client MG", min_value=1, value=100, step=1, key="new_cfg_calc_default_mg")
+        with calc_c2:
+            calc_round5 = st.toggle("Round to nearest 5", value=True, key="new_cfg_calc_round5")
+
+        calc_slabs = st.data_editor(
+            pd.DataFrame(columns=["min_mg", "max_mg", "minus_value"]),
+            num_rows="dynamic",
+            use_container_width=True,
+            key="new_cfg_calc_slab_editor",
+        )
+
+        cfg.update({
+            "calculation_config": {
+                "default_mg": int(calc_default_mg),
+                "round_to_5": bool(calc_round5),
+                "adjustment_slabs": [
+                    {
+                        "min_mg": float(r["min_mg"]),
+                        "max_mg": float(r["max_mg"]),
+                        "minus_value": float(r["minus_value"]),
+                    }
+                    for _, r in calc_slabs.dropna(subset=["min_mg", "max_mg", "minus_value"]).iterrows()
+                ],
+            }
+        })
 
     if st.button("Save Client Config", key="new_cfg_save_btn"):
         if not cfg["client_key"]:
             st.error("Client Key is required.")
         elif not cfg["client_name"]:
             st.error("Client Name is required.")
-        elif not cfg["menu_categories"]:
-            st.error("At least one menu category is required.")
+        elif cfg["mode"] == "Embedded" and not cfg.get("menu_categories"):
+            st.error("At least one menu category is required for Embedded mode.")
         else:
             save_client_configuration(cfg["client_key"], cfg)
             st.success("New client configuration saved in modular override files.")
@@ -201,6 +249,9 @@ def _render_generate_production_plan_tab():
             "slab_adjustments": list(getattr(L, "slab_adjustments", [])),
             "additional_requirements": getattr(L, "additional_requirements", ""),
             "custom_bump_pct": float(getattr(L, "custom_bump_pct", 0.0)),
+            "mode": "Embedded" if L.has_embeddings else "Calculation",
+            "nonveg_item_count": int(getattr(L, "nonveg_item_count", 1)),
+            "category_repeats": list(getattr(L, "category_repeats", [])),
         }
 
     cfg_key = k("client_config")
@@ -276,6 +327,9 @@ def _render_generate_production_plan_tab():
     configured_star = {norm(x) for x in (cfg.get("star_categories") or [])}
     nonveg_mode = cfg.get("nonveg_mode") or getattr(L, "custom_nonveg_mode", "Optional")
     slab_adjustments = cfg.get("slab_adjustments") or []
+    configured_nonveg_count = int(cfg.get("nonveg_item_count") or getattr(L, "nonveg_item_count", 1))
+    repeat_rows = cfg.get("category_repeats") or []
+    repeat_map = {norm(r.get("category", "")): int(r.get("count_in_menu", 1)) for r in repeat_rows if r.get("category")}
 
     # ═══════════════ INPUTS ═══════════════
     sel_date = st.date_input("Select today's date:", key=k("sel_date"))
@@ -323,15 +377,15 @@ def _render_generate_production_plan_tab():
     
     # Nonveg item(s) — shown if toggle on OR if client always has nonveg
     show_nv = nonveg_mode != "Not Needed" and ((L.has_nonveg_toggle and is_nv) or (
-        not L.has_nonveg_toggle and L.nonveg_item_count > 0 and L.has_vendor_plan
+        not L.has_nonveg_toggle and configured_nonveg_count > 0 and L.has_vendor_plan
     ))
     
     if show_nv:
         nv_opts = get_nv_cats(CK, INFO["dataset"], L) if INFO.get("dataset") else []
         if nv_opts:
-            for ni in range(L.nonveg_item_count):
+            for ni in range(configured_nonveg_count):
                 nvc = st.selectbox(
-                    f"Non-Veg Category{f' #{ni + 1}' if L.nonveg_item_count > 1 else ''}",
+                    f"Non-Veg Category{f' #{ni + 1}' if configured_nonveg_count > 1 else ''}",
                     nv_opts,
                     key=k(f"nvc_{ni}"),
                 )
@@ -406,22 +460,29 @@ def _render_generate_production_plan_tab():
     st.subheader("Enter Menu Items by Category")
     star_ui = configured_star or {"flavour rice", "flavoured rice", "veg curry", "veg gravy"}
     north_pp = None  # for Rippling
-    
+
+    expanded_categories = []
     for cat in configured_categories:
-        lbl = f"Item name for {cat}:"
-        if norm(cat) in star_ui:
+        count = max(1, repeat_map.get(norm(cat), 1))
+        expanded_categories.append((cat, cat))
+        for idx in range(1, count):
+            expanded_categories.append((f"{cat}{idx}", cat))
+
+    for display_cat, base_cat in expanded_categories:
+        lbl = f"Item name for {display_cat}:"
+        if norm(base_cat) in star_ui:
             lbl = f"⭐ {lbl}"
-    
-        item = st.text_input(lbl, key=k(f"item_{kcat(cat)}"))
+
+        item = st.text_input(lbl, key=k(f"item_{kcat(display_cat)}"))
         if not item:
             continue
-    
+
         menu.append(item)
         item_norm = norm(item)
-    
-        icat = L.category_display_map.get(cat, cat)  # display -> internal
+
+        icat = L.category_display_map.get(base_cat, base_cat)  # display -> internal
         cc = L.canonicalize_category(icat)
-    
+
         if cc == "salad":
             sc = "salad"
         elif item_norm in i2s_lc:
@@ -430,26 +491,23 @@ def _render_generate_production_plan_tab():
         else:
             opts = c2s.get(cc, [])
             sc = (
-                st.selectbox(f"Sub-cat for '{item}' ({cat}):", opts, key=k(f"sc_{kcat(cat)}"))
+                st.selectbox(f"Sub-cat for '{item}' ({display_cat}):", opts, key=k(f"sc_{kcat(display_cat)}"))
                 if opts
-                else st.text_input(f"Sub-cat for '{item}':", key=k(f"sc_{kcat(cat)}_t"))
+                else st.text_input(f"Sub-cat for '{item}':", key=k(f"sc_{kcat(display_cat)}_t"))
             )
-    
+
         entries.append(
             {
                 "item": item,
                 "subcat": sc,
                 "category": cc,             # internal canonical category
                 "mg": cmg,
-                "display_category": cat,    # UI/display category
+                "display_category": display_cat,    # UI/display category
                 "needs_shared_mg": False,
             }
         )
     
     
-    if cfg.get("additional_requirements"):
-        st.caption(f"Additional requirement: {cfg['additional_requirements']}")
-
     # ═══════════════ PREDICT ═══════════════
     if st.button("Predict", key=k("predict_btn")):
         st.markdown(f"### Prediction Results — {sel}")

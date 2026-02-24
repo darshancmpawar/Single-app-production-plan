@@ -51,11 +51,14 @@ def save_client_configuration(client_key: str, config: dict[str, Any]) -> None:
 
     logic_overrides = dict(load_logic_overrides())
     logic_overrides[ck] = {
+        "mode": config.get("mode", "Embedded"),
         "menu_categories": config.get("menu_categories", []),
         "star_categories": config.get("star_categories", []),
         "nonveg_mode": config.get("nonveg_mode", "Optional"),
+        "nonveg_item_count": int(config.get("nonveg_item_count", 1) or 1),
         "slab_adjustments": config.get("slab_adjustments", []),
-        "additional_requirements": config.get("additional_requirements", ""),
+        "category_repeats": config.get("category_repeats", []),
+        "calculation_config": config.get("calculation_config", {}),
         "custom_bump_pct": float(config.get("custom_bump_pct", 0.0) or 0.0),
     }
     _write_module_dict(
@@ -67,6 +70,7 @@ def save_client_configuration(client_key: str, config: dict[str, Any]) -> None:
 
     db_overrides = dict(load_db_overrides())
     db_overrides.setdefault(ck, {})["name"] = config.get("client_name", ck.title())
+    db_overrides.setdefault(ck, {})["has_embeddings"] = config.get("mode", "Embedded") == "Embedded"
     _write_module_dict(
         DB_OVERRIDES_MODULE,
         "DB_OVERRIDES",
