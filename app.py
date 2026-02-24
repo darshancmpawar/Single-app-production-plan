@@ -66,42 +66,63 @@ with tab1:
     st.subheader("Configure New Client")
     st.caption("Tab 1 is only for defining new client configuration.")
 
-    client_name = st.text_input("Client Name", key="new_cfg_client_name").strip()
-    auto_slug = _slugify(client_name)
-    st.text_input("Client Key (slug)", value=auto_slug, disabled=True, help="Auto-generated from Client Name")
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        client_name = st.text_input("Client Name", key="new_cfg_client_name").strip()
+    with c2:
+        auto_slug = _slugify(client_name)
+        st.text_input("Client Key (slug)", value=auto_slug, disabled=True, help="Auto-generated from Client Name")
 
-    cfg = {
-        "client_key": auto_slug,
-        "client_name": client_name,
-        "menu_categories": st.multiselect(
+    c3, c4 = st.columns([1, 1])
+    with c3:
+        menu_categories = st.multiselect(
             "Menu Category's",
             options=[
                 "Flavour Rice", "Indian Bread", "White Rice", "Veg Dry", "Veg Curry", "Dal", "Sambar", "Rasam", "Salad",
             ],
             key="new_cfg_menu_categories",
-        ),
-        "nonveg_mode": st.selectbox(
+        )
+    with c4:
+        nonveg_mode = st.selectbox(
             "Non-Veg Switch Required?",
             ["Required", "Optional", "Not Needed"],
             key="new_cfg_nonveg_mode",
-        ),
-        "star_categories": st.multiselect(
+        )
+
+    c5, c6 = st.columns([1, 1])
+    with c5:
+        star_categories = st.multiselect(
             "Star Item List",
-            options=st.session_state.get("new_cfg_menu_categories", []),
+            options=menu_categories,
             key="new_cfg_star_categories",
-        ),
-        "additional_requirements": st.text_area(
-            "Another requirement input to configure a client",
-            key="new_cfg_additional_requirements",
-        ),
-        "custom_bump_pct": st.number_input(
+        )
+    with c6:
+        use_custom_bump = st.toggle("Use custom bump %?", value=False, key="new_cfg_use_custom_bump")
+        st.selectbox("Existing bump profile", ["Default Logic", "Conservative", "Balanced", "Aggressive"], key="new_cfg_existing_bump")
+        custom_bump_pct = st.number_input(
             "Custom Bump % (for aggressive plan)",
             min_value=0.0,
             max_value=100.0,
-            value=0.0,
+            value=10.0,
             step=0.5,
+            disabled=not use_custom_bump,
             key="new_cfg_custom_bump_pct",
-        ),
+            help="Enable toggle to override existing bump profile.",
+        )
+
+    additional_requirements = st.text_area(
+        "Another requirement input to configure a client",
+        key="new_cfg_additional_requirements",
+    )
+
+    cfg = {
+        "client_key": auto_slug,
+        "client_name": client_name,
+        "menu_categories": menu_categories,
+        "nonveg_mode": nonveg_mode,
+        "star_categories": star_categories,
+        "additional_requirements": additional_requirements,
+        "custom_bump_pct": float(custom_bump_pct if use_custom_bump else 0.0),
     }
 
     st.markdown("#### Slab wise adjustment")
