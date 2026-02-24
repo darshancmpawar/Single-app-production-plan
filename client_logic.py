@@ -348,6 +348,10 @@ class _LogicOverrideProxy:
         return self._override.get("additional_requirements", "")
 
     @property
+    def existing_bump_profile(self):
+        return self._override.get("existing_bump_profile", "Default Logic")
+
+    @property
     def custom_bump_pct(self):
         return float(self._override.get("custom_bump_pct", 0.0) or 0.0)
 

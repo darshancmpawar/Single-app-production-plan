@@ -55,10 +55,10 @@ def save_client_configuration(client_key: str, config: dict[str, Any]) -> None:
         "menu_categories": config.get("menu_categories", []),
         "star_categories": config.get("star_categories", []),
         "nonveg_mode": config.get("nonveg_mode", "Optional"),
-        "nonveg_item_count": int(config.get("nonveg_item_count", 1) or 1),
         "slab_adjustments": config.get("slab_adjustments", []),
         "category_repeats": config.get("category_repeats", []),
         "calculation_config": config.get("calculation_config", {}),
+        "existing_bump_profile": config.get("existing_bump_profile", "Default Logic"),
         "custom_bump_pct": float(config.get("custom_bump_pct", 0.0) or 0.0),
     }
     _write_module_dict(

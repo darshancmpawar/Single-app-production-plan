@@ -98,7 +98,6 @@ with tab1:
                 ["Required", "Optional", "Not Needed"],
                 key="new_cfg_nonveg_mode",
             )
-            nonveg_item_count = st.number_input("No. of Non-Veg items", min_value=0, max_value=5, value=1, step=1, key="new_cfg_nonveg_item_count")
 
         c5, c6 = st.columns([1, 1])
         with c5:
@@ -109,17 +108,23 @@ with tab1:
             )
         with c6:
             use_custom_bump = st.toggle("Use custom bump %?", value=False, key="new_cfg_use_custom_bump")
-            st.selectbox("Existing bump profile", ["Default Logic", "Conservative", "Balanced", "Aggressive"], key="new_cfg_existing_bump")
-            custom_bump_pct = st.number_input(
-                "Custom Bump % (for aggressive plan)",
-                min_value=0.0,
-                max_value=100.0,
-                value=10.0,
-                step=0.5,
-                disabled=not use_custom_bump,
-                key="new_cfg_custom_bump_pct",
-                help="Enable toggle to override existing bump profile.",
-            )
+            if use_custom_bump:
+                custom_bump_pct = st.number_input(
+                    "Custom Bump % (for aggressive plan)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=10.0,
+                    step=0.5,
+                    key="new_cfg_custom_bump_pct",
+                )
+                existing_bump_profile = "Custom"
+            else:
+                existing_bump_profile = st.selectbox(
+                    "Existing bump profile",
+                    ["Default Logic", "Conservative", "Balanced", "Aggressive"],
+                    key="new_cfg_existing_bump",
+                )
+                custom_bump_pct = 0.0
 
         st.markdown("#### Slab wise adjustment")
         slab_edit = st.data_editor(
@@ -153,17 +158,17 @@ with tab1:
         cfg.update({
             "menu_categories": menu_categories,
             "nonveg_mode": nonveg_mode,
-            "nonveg_item_count": int(nonveg_item_count),
             "star_categories": star_categories,
+            "existing_bump_profile": existing_bump_profile,
             "custom_bump_pct": float(custom_bump_pct if use_custom_bump else 0.0),
             "slab_adjustments": slab_adjustments,
             "category_repeats": category_repeats,
         })
     else:
-        st.info("Calculation mode (Toasttab-like): configure direct MG calculation settings.")
+        st.info("Calculation mode (Toasttab-like): configure multiplier-based Vendor MG settings.")
         calc_c1, calc_c2 = st.columns([1, 1])
         with calc_c1:
-            calc_default_mg = st.number_input("Default Client MG", min_value=1, value=100, step=1, key="new_cfg_calc_default_mg")
+            calc_multiplier = st.number_input("Vendor MG Multiplier", min_value=0.1, value=0.9, step=0.05, key="new_cfg_calc_multiplier")
         with calc_c2:
             calc_round5 = st.toggle("Round to nearest 5", value=True, key="new_cfg_calc_round5")
 
@@ -176,7 +181,7 @@ with tab1:
 
         cfg.update({
             "calculation_config": {
-                "default_mg": int(calc_default_mg),
+                "vendor_mg_multiplier": float(calc_multiplier),
                 "round_to_5": bool(calc_round5),
                 "adjustment_slabs": [
                     {
@@ -250,7 +255,6 @@ def _render_generate_production_plan_tab():
             "additional_requirements": getattr(L, "additional_requirements", ""),
             "custom_bump_pct": float(getattr(L, "custom_bump_pct", 0.0)),
             "mode": "Embedded" if L.has_embeddings else "Calculation",
-            "nonveg_item_count": int(getattr(L, "nonveg_item_count", 1)),
             "category_repeats": list(getattr(L, "category_repeats", [])),
         }
 
@@ -327,9 +331,13 @@ def _render_generate_production_plan_tab():
     configured_star = {norm(x) for x in (cfg.get("star_categories") or [])}
     nonveg_mode = cfg.get("nonveg_mode") or getattr(L, "custom_nonveg_mode", "Optional")
     slab_adjustments = cfg.get("slab_adjustments") or []
-    configured_nonveg_count = int(cfg.get("nonveg_item_count") or getattr(L, "nonveg_item_count", 1))
     repeat_rows = cfg.get("category_repeats") or []
     repeat_map = {norm(r.get("category", "")): int(r.get("count_in_menu", 1)) for r in repeat_rows if r.get("category")}
+
+    nv_seed_categories = [c for c in configured_categories if "non veg" in norm(c)]
+    configured_nonveg_count = sum(max(1, repeat_map.get(norm(c), 1)) for c in nv_seed_categories)
+    if configured_nonveg_count <= 0:
+        configured_nonveg_count = int(getattr(L, "nonveg_item_count", 1))
 
     # ═══════════════ INPUTS ═══════════════
     sel_date = st.date_input("Select today's date:", key=k("sel_date"))
