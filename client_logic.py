@@ -10,9 +10,9 @@ ARCHITECTURE:
 TO ADD A CLIENT WITH SAME LOGIC:  add 1 line to LOGIC_REGISTRY
 TO ADD A CLIENT WITH DIFFERENT LOGIC:  subclass, override, add to LOGIC_REGISTRY
 """
-import math
 from abc import ABC, abstractmethod
 from ml_core import norm
+from Logic_Definer import load_logic_overrides
 
 # ═══════════════════════════════════════════════════════════════════════
 # Base contract
@@ -299,6 +299,48 @@ class ToasttabLogic(BaseLogic):
         elif c<55: return c
         else: return c-5
 
+
+
+class _LogicOverrideProxy:
+    def __init__(self, base, override):
+        self._base = base
+        self._override = override or {}
+
+    @property
+    def fixed_categories(self):
+        return self._override.get("menu_categories") or self._base.fixed_categories
+
+    @property
+    def star_categories(self):
+        values = self._override.get("star_categories")
+        return set(values) if values else self._base.star_categories
+
+    @property
+    def custom_nonveg_mode(self):
+        return self._override.get("nonveg_mode", "Optional")
+
+    @property
+    def slab_adjustments(self):
+        return self._override.get("slab_adjustments", [])
+
+    @property
+    def additional_requirements(self):
+        return self._override.get("additional_requirements", "")
+
+    @property
+    def custom_bump_pct(self):
+        return float(self._override.get("custom_bump_pct", 0.0) or 0.0)
+
+    def aggressive_bump(self, w):
+        pct = self.custom_bump_pct
+        if pct > 0:
+            return round(float(w) * (1 + pct / 100.0), 1)
+        return self._base.aggressive_bump(w)
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # REGISTRY — map client keys to logic classes
 # Same logic? Just point to the same class.
@@ -314,6 +356,9 @@ LOGIC_REGISTRY = {
 }
 
 def get_logic(ck):
-    cls=LOGIC_REGISTRY.get(ck.strip().lower())
+    key = ck.strip().lower()
+    cls = LOGIC_REGISTRY.get(key)
     if not cls: raise ValueError(f"No logic for '{ck}'. Available: {sorted(LOGIC_REGISTRY)}")
-    return cls()
+    base = cls()
+    override = load_logic_overrides().get(key, {})
+    return _LogicOverrideProxy(base, override)
