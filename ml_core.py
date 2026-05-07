@@ -41,12 +41,22 @@ def artifacts_exist(ck, encoder_columns):
     return all(os.path.exists(_ap(ck,f)) for f in fns)
 
 # ── cache ──
+# _C is shared across all Streamlit sessions in the same Python process.
+# Two threads racing on first load could both miss the `not in` check and
+# both call fn() (e.g. tf.keras.models.load_model). Guard the slow path
+# with concurrency.cache_lock; fast path stays lock-free.
+from concurrency import cache_lock as _cache_lock
+
 _C={}
 def clear_cache(ck=None):
-    if ck: [_C.pop(k) for k in [k for k in _C if k.startswith(f"{ck}:")]]
-    else: _C.clear()
+    with _cache_lock():
+        if ck: [_C.pop(k) for k in [k for k in _C if k.startswith(f"{ck}:")]]
+        else: _C.clear()
 def _lc(k,fn):
-    if k not in _C: _C[k]=fn()
+    if k in _C: return _C[k]
+    with _cache_lock():
+        if k not in _C:
+            _C[k]=fn()
     return _C[k]
 
 def load_model(ck): return _lc(f"{ck}:mdl", lambda: tf.keras.models.load_model(_ap(ck,"per_pax_tf_model.keras")))

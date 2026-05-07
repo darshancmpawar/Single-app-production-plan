@@ -19,6 +19,7 @@ from planner import (
     build_row, client_plan, fixed_pp_client_plan, vendor_plan,
     aggressive_plan, special_day_mg, gavg, classify, mg5,
 )
+from concurrency import predict_gate, train_gate, GateBusy, MAX_CONCURRENT_PREDICTS
 
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
@@ -668,6 +669,9 @@ def _render_generate_production_plan_tab():
         st.stop()
 
     # ── ENSURE MODEL ARTIFACTS ──────────────────────────────────────────
+    # train_gate ensures only ONE training thread per client at a time.
+    # If another session is already training the same client, this session
+    # waits, then sees artifacts present and skips (re-checks under lock).
     def _ensure():
         if artifacts_exist(CK, L.encoder_columns):
             return
@@ -680,9 +684,15 @@ def _render_generate_production_plan_tab():
             st.stop()
         with st.spinner(f"Training model for {sel} — this may take a minute…"):
             try:
-                _, rmse = train_model(CK, ds, L)
-                clear_cache(CK)
-                st.success(f"Model trained. RMSE: {rmse:.4f}")
+                with train_gate(CK):
+                    if artifacts_exist(CK, L.encoder_columns):
+                        return  # built by another session while we waited
+                    _, rmse = train_model(CK, ds, L)
+                    clear_cache(CK)
+                    st.success(f"Model trained. RMSE: {rmse:.4f}")
+            except GateBusy as e:
+                st.error(str(e))
+                st.stop()
             except Exception as e:
                 st.error(f"Training failed: {e}")
                 st.stop()
@@ -901,44 +911,54 @@ def _render_generate_production_plan_tab():
             st.warning("Add at least one menu item.")
             st.stop()
 
+        # predict_gate caps simultaneous predict loops process-wide so the
+        # 1-CPU / 1-GB Streamlit Cloud tier doesn't OOM under concurrent users.
+        # Excess sessions queue here briefly; on timeout they get a clean retry msg.
+        # We hold the gate ONLY across the predict loop, not the plan-render
+        # below, so non-ML rendering doesn't keep slots occupied.
         results = []
-        with st.spinner("Running predictions…"):
-            for e in entries:
-                item = e["item"]
-                sc   = e["subcat"]
-                cat  = e["category"]
-                img  = e["mg"]
-                dcat = e["display_category"]
+        try:
+            with predict_gate():
+                with st.spinner("Running predictions…"):
+                    for e in entries:
+                        item = e["item"]
+                        sc   = e["subcat"]
+                        cat  = e["category"]
+                        img  = e["mg"]
+                        dcat = e["display_category"]
 
-                if dcat == "South Veg dry" and north_pp is not None:
-                    pp, tq = north_pp
-                elif norm(cat) == "salad":
-                    pp = L.salad_per_pax
-                    tq = pp * img
-                else:
-                    pr = predict(
-                        CK, item, menu, img, sc, cat, day_norm, L,
-                        day_type=cdt, holiday_type=cht, meal_day=meal_day,
-                    )
-                    if not pr.ok:
-                        st.error(f"❌ {pr.error}  Skipping '{item}'.")
-                        continue
-                    if pr.fallback:
-                        st.warning(f"⚠️ '{item}' unseen — fallback via '{pr.fallback_item}'.")
-                    pp = pr.per_pax
-                    tq = pr.total_qty
+                        if dcat == "South Veg dry" and north_pp is not None:
+                            pp, tq = north_pp
+                        elif norm(cat) == "salad":
+                            pp = L.salad_per_pax
+                            tq = pp * img
+                        else:
+                            pr = predict(
+                                CK, item, menu, img, sc, cat, day_norm, L,
+                                day_type=cdt, holiday_type=cht, meal_day=meal_day,
+                            )
+                            if not pr.ok:
+                                st.error(f"❌ {pr.error}  Skipping '{item}'.")
+                                continue
+                            if pr.fallback:
+                                st.warning(f"⚠️ '{item}' unseen — fallback via '{pr.fallback_item}'.")
+                            pp = pr.per_pax
+                            tq = pr.total_qty
 
-                if dcat == "North Veg dry":
-                    north_pp = (pp, tq)
+                        if dcat == "North Veg dry":
+                            north_pp = (pp, tq)
 
-                row = build_row(
-                    pp, tq,
-                    L.canonicalize_category(dcat) if dcat != cat else cat,
-                    item, is_nv, nv_cat, L,
-                )
-                if dcat in ("North Veg dry", "South Veg dry"):
-                    row["Category"] = dcat
-                results.append(row)
+                        row = build_row(
+                            pp, tq,
+                            L.canonicalize_category(dcat) if dcat != cat else cat,
+                            item, is_nv, nv_cat, L,
+                        )
+                        if dcat in ("North Veg dry", "South Veg dry"):
+                            row["Category"] = dcat
+                        results.append(row)
+        except GateBusy as ge:
+            st.warning(str(ge))
+            st.stop()
 
         if not results:
             st.stop()
