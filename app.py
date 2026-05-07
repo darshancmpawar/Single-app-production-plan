@@ -12,14 +12,14 @@ from client_database import CLIENT_LIST, name_to_key, get_info
 from client_logic import get_logic
 from Logic_Definer import save_client_configuration
 from ml_core import (
-    artifacts_exist, clear_cache, load_map, norm, fmt_cols,
-    cats_match, get_nv_cats, predict, train_model,
+    artifacts_exist, load_map, norm, fmt_cols,
+    cats_match, get_nv_cats, predict,
 )
 from planner import (
     build_row, client_plan, fixed_pp_client_plan, vendor_plan,
     aggressive_plan, special_day_mg, gavg, classify, mg5,
 )
-from concurrency import predict_gate, train_gate, GateBusy, MAX_CONCURRENT_PREDICTS
+from concurrency import predict_gate, GateBusy, MAX_CONCURRENT_PREDICTS
 
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
@@ -669,33 +669,28 @@ def _render_generate_production_plan_tab():
         st.stop()
 
     # ── ENSURE MODEL ARTIFACTS ──────────────────────────────────────────
-    # train_gate ensures only ONE training thread per client at a time.
-    # If another session is already training the same client, this session
-    # waits, then sees artifacts present and skips (re-checks under lock).
+    # The runtime never trains. Artifacts are produced offline by
+    # `scripts/train.py` (run locally or via the Train Models GitHub Action).
+    # If they're missing here, fail fast with a clear repair path.
     def _ensure():
         if artifacts_exist(CK, L.encoder_columns):
             return
-        ds = INFO.get("dataset")
-        if not ds:
-            st.error(f"No dataset configured for {sel}.")
-            st.stop()
-        if not os.path.exists(ds):
-            st.error(f"Dataset file not found: {ds}")
-            st.stop()
-        with st.spinner(f"Training model for {sel} — this may take a minute…"):
-            try:
-                with train_gate(CK):
-                    if artifacts_exist(CK, L.encoder_columns):
-                        return  # built by another session while we waited
-                    _, rmse = train_model(CK, ds, L)
-                    clear_cache(CK)
-                    st.success(f"Model trained. RMSE: {rmse:.4f}")
-            except GateBusy as e:
-                st.error(str(e))
-                st.stop()
-            except Exception as e:
-                st.error(f"Training failed: {e}")
-                st.stop()
+        st.error(
+            f"Model artifacts for **{sel}** are missing.\n\n"
+            "They are built offline by the **Train Models** GitHub Actions "
+            "workflow. Trigger it via **Actions → Train Models → Run "
+            f"workflow** (client: `{CK}`), wait for the auto-commit, then "
+            "refresh this page."
+        )
+        with st.expander("Expected artifact files"):
+            expected = [
+                f"artifacts/{CK}_per_pax_tf_model.keras",
+                f"artifacts/{CK}_item_to_subcat.pkl",
+                f"artifacts/{CK}_item_to_cat.pkl",
+                f"artifacts/{CK}_cat_to_subs.pkl",
+            ] + [f"artifacts/{CK}_{c}_encoder.pkl" for c in L.encoder_columns]
+            st.code("\n".join(expected))
+        st.stop()
 
     _ensure()
 

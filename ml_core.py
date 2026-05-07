@@ -10,7 +10,11 @@ import numpy as np, pandas as pd, tensorflow as tf, joblib
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
 
-ARTIFACT_DIR = os.environ.get("ARTIFACT_DIR", os.path.dirname(__file__))
+ARTIFACT_DIR = os.environ.get(
+    "ARTIFACT_DIR",
+    os.path.join(os.path.dirname(__file__), "artifacts"),
+)
+os.makedirs(ARTIFACT_DIR, exist_ok=True)
 SEED = 42; CTX_LEN = 10; EPOCHS = 20; BATCH = 32; VAL_SPLIT = 0.1; TEST_SIZE = 0.2
 EMB_DIMS = {"menu_items":8,"sub_category":4,"category":4,"weekday":2,"day_type":2,"holiday_type":2,"meal_day":2}
 
