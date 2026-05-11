@@ -10,7 +10,6 @@ import streamlit as st
 
 from client_database import CLIENT_LIST, name_to_key, get_info
 from client_logic import get_logic
-from Logic_Definer import save_client_configuration
 from ml_core import (
     artifacts_exist, load_map, norm, fmt_cols,
     cats_match, get_nv_cats, predict,
@@ -507,132 +506,8 @@ def kcat(cat: str) -> str:
     return norm(str(cat)).replace(" ", "_").replace("/", "_").replace("-", "_")
 
 
-def _default_client_config():
-    return {
-        "client_name": sel,
-        "menu_categories": list(L.fixed_categories),
-        "nonveg_mode": getattr(L, "custom_nonveg_mode", ("Optional" if L.has_nonveg_toggle else "Not Needed")),
-        "star_categories": list(L.star_categories),
-        "slab_adjustments": list(getattr(L, "slab_adjustments", [])),
-        "additional_requirements": getattr(L, "additional_requirements", ""),
-    }
-
-
-cfg_key = k("client_config")
-if cfg_key not in st.session_state:
-    st.session_state[cfg_key] = _default_client_config()
-
-
-# ═══════════════ TABS ═══════════════
-tab1, tab2 = st.tabs(["⚙️  Config Client", "📊  Generate Production Plan"])
-
-
 # ═══════════════════════════════════════════════════════
-#  TAB 1 — CLIENT CONFIGURATION
-# ═══════════════════════════════════════════════════════
-with tab1:
-    cfg = st.session_state[cfg_key]
-
-    st.markdown('<div class="sec"><span class="sec-icon">🏢</span><span class="sec-label">Client Identity</span></div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        cfg["client_name"] = st.text_input(
-            "Client Name",
-            value=cfg.get("client_name", sel),
-            key=k("cfg_client_name"),
-        )
-    with c2:
-        cfg["nonveg_mode"] = st.selectbox(
-            "Non-Veg Switch",
-            ["Required", "Optional", "Not Needed"],
-            index=["Required", "Optional", "Not Needed"].index(cfg.get("nonveg_mode", "Optional")),
-            key=k("cfg_nonveg_mode"),
-        )
-
-    st.markdown('<div class="sec"><span class="sec-icon">🗂️</span><span class="sec-label">Menu Configuration</span></div>', unsafe_allow_html=True)
-    available_categories = sorted({str(x) for x in list(L.fixed_categories)})
-    default_menu = [c for c in cfg.get("menu_categories", []) if c in available_categories]
-    if not default_menu:
-        default_menu = [c for c in L.fixed_categories if c in available_categories]
-
-    cfg["menu_categories"] = st.multiselect(
-        "Menu Categories",
-        options=available_categories,
-        default=default_menu,
-        key=k("cfg_menu_categories"),
-    )
-
-    cfg["star_categories"] = st.multiselect(
-        "⭐  Star Items  —  priority categories for vendor MG calculation",
-        options=cfg["menu_categories"] if cfg["menu_categories"] else available_categories,
-        default=[x for x in cfg.get("star_categories", []) if x in (cfg["menu_categories"] or available_categories)],
-        key=k("cfg_star_categories"),
-    )
-
-    st.markdown('<div class="sec"><span class="sec-icon">📐</span><span class="sec-label">Slab-wise MG Adjustment</span></div>', unsafe_allow_html=True)
-    slab_default = cfg.get("slab_adjustments", [])
-    seed_rows = slab_default if slab_default else [{"min_mg": None, "max_mg": None, "adjustment_pct": None}]
-    slab_df = pd.DataFrame(seed_rows, columns=["min_mg", "max_mg", "adjustment_pct"])
-    slab_edit = st.data_editor(
-        slab_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        key=k("cfg_slab_editor"),
-        column_config={
-            "min_mg":         st.column_config.NumberColumn("Min MG",       min_value=0, format="%.0f"),
-            "max_mg":         st.column_config.NumberColumn("Max MG",       min_value=0, format="%.0f"),
-            "adjustment_pct": st.column_config.NumberColumn("Adjustment %", format="%.1f"),
-        },
-    )
-    cfg["slab_adjustments"] = [
-        {
-            "min_mg":         float(r["min_mg"]),
-            "max_mg":         float(r["max_mg"]),
-            "adjustment_pct": float(r["adjustment_pct"]),
-        }
-        for _, r in slab_edit.dropna(subset=["min_mg", "max_mg", "adjustment_pct"]).iterrows()
-    ]
-
-    st.markdown('<div class="sec"><span class="sec-icon">📝</span><span class="sec-label">Additional Requirements</span></div>', unsafe_allow_html=True)
-    cfg["additional_requirements"] = st.text_area(
-        "Client-specific notes or constraints",
-        value=cfg.get("additional_requirements", ""),
-        key=k("cfg_additional_requirements"),
-        height=100,
-        placeholder="e.g. Always add 10% buffer on Mondays…",
-    )
-
-    st.session_state[cfg_key] = cfg
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    sv_col, _ = st.columns([1, 4])
-    with sv_col:
-        if st.button("💾  Save Config", key=k("cfg_save_btn"), use_container_width=True):
-            if not cfg.get("client_name", "").strip():
-                st.error("Client Name is required.")
-            elif not cfg.get("menu_categories"):
-                st.error("At least one menu category is required.")
-            else:
-                save_client_configuration(CK, cfg)
-                st.success("Configuration saved.")
-
-
-# ─── slab helper ───
-def _apply_slab_adjustment(base_mg: float, slabs: list[dict]) -> float:
-    mg = float(base_mg)
-    for slab in slabs:
-        lo  = slab.get("min_mg")
-        hi  = slab.get("max_mg")
-        pct = slab.get("adjustment_pct")
-        if lo is None or hi is None or pct is None:
-            continue
-        if lo <= mg <= hi:
-            return max(mg + (mg * pct / 100.0), 1.0)
-    return mg
-
-
-# ═══════════════════════════════════════════════════════
-#  TAB 2 — GENERATE PRODUCTION PLAN
+#  GENERATE PRODUCTION PLAN
 # ═══════════════════════════════════════════════════════
 def _render_generate_production_plan_tab():
 
@@ -699,11 +574,9 @@ def _render_generate_production_plan_tab():
     c2s    = load_map(CK, "cat_to_subs")
     i2s_lc = {norm(k0): v for k0, v in i2s.items()}
 
-    cfg = st.session_state.get(cfg_key, _default_client_config())
-    configured_categories = cfg.get("menu_categories") or list(L.fixed_categories)
-    configured_star        = {norm(x) for x in (cfg.get("star_categories") or [])}
-    nonveg_mode            = cfg.get("nonveg_mode") or getattr(L, "custom_nonveg_mode", "Optional")
-    slab_adjustments       = cfg.get("slab_adjustments") or []
+    configured_categories = list(L.fixed_categories)
+    configured_star       = {norm(x) for x in L.star_categories}
+    nonveg_mode           = getattr(L, "custom_nonveg_mode", "Optional" if L.has_nonveg_toggle else "Not Needed")
 
     # ── DATE & CONTEXT ──────────────────────────────────────────────────
     st.markdown('<div class="sec"><span class="sec-icon">📅</span><span class="sec-label">Date &amp; Context</span></div>', unsafe_allow_html=True)
@@ -759,7 +632,6 @@ def _render_generate_production_plan_tab():
     if nonveg_mode == "Required":
         is_nv    = True
         meal_day = "nonveg"
-        st.info("Non-Veg is marked as **required** from Config Client.")
     elif nonveg_mode == "Optional" and L.has_nonveg_toggle:
         is_nv    = st.toggle("🍗 Non-Veg Day?", value=True, key=k("is_nv"))
         meal_day = "nonveg" if is_nv else "veg"
@@ -840,9 +712,7 @@ def _render_generate_production_plan_tab():
             "Shared Client MG",
             min_value=1, step=1, value=L.default_mg, key=k("shared_cmg"),
         )
-    cmg = _apply_slab_adjustment(cmg_input, slab_adjustments)
-    if cmg != cmg_input:
-        st.caption(f"Slab adjusted → {cmg:.1f}  (base: {cmg_input})")
+    cmg = cmg_input
 
     # patch nonveg entries that use shared MG
     for e in entries:
@@ -882,9 +752,6 @@ def _render_generate_production_plan_tab():
             "item": item, "subcat": sc, "category": cc,
             "mg": cmg, "display_category": cat, "needs_shared_mg": False,
         })
-
-    if cfg.get("additional_requirements"):
-        st.caption(f"ℹ️  {cfg['additional_requirements']}")
 
     # ── PREDICT BUTTON ──────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1045,5 +912,4 @@ def _render_generate_production_plan_tab():
             with s2:  st.metric("Adjusted Vendor MG", f"{vmg_sd:.0f}")
 
 
-with tab2:
-    _render_generate_production_plan_tab()
+_render_generate_production_plan_tab()
