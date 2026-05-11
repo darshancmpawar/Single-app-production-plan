@@ -5,7 +5,6 @@ To add a client: add one entry to CLIENT_DB.
 has_embeddings=False means multiplier-only (like Toasttab).
 """
 import os
-from Logic_Definer import load_db_overrides
 DIR = os.path.dirname(__file__)
 
 CLIENT_DB = {
@@ -20,20 +19,12 @@ CLIENT_DB = {
 
 
 
-def _with_overrides() -> dict:
-    merged = {k: dict(v) for k, v in CLIENT_DB.items()}
-    for ck, ov in load_db_overrides().items():
-        if ck in merged:
-            merged[ck].update(ov)
-    return merged
-
-
-CLIENT_LIST = [v["name"] for v in _with_overrides().values()]
+CLIENT_LIST = [v["name"] for v in CLIENT_DB.values()]
 
 def name_to_key(display_name):
-    for k,v in _with_overrides().items():
-        if v["name"]==display_name: return k
+    for k, v in CLIENT_DB.items():
+        if v["name"] == display_name: return k
     raise ValueError(f"Unknown client '{display_name}'")
 
 def get_info(ck):
-    return _with_overrides()[ck.strip().lower()]
+    return CLIENT_DB[ck.strip().lower()]

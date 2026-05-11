@@ -10,7 +10,11 @@ import numpy as np, pandas as pd, tensorflow as tf, joblib
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
 
-ARTIFACT_DIR = os.environ.get("ARTIFACT_DIR", os.path.dirname(__file__))
+ARTIFACT_DIR = os.environ.get(
+    "ARTIFACT_DIR",
+    os.path.join(os.path.dirname(__file__), "artifacts"),
+)
+os.makedirs(ARTIFACT_DIR, exist_ok=True)
 SEED = 42; CTX_LEN = 10; EPOCHS = 20; BATCH = 32; VAL_SPLIT = 0.1; TEST_SIZE = 0.2
 EMB_DIMS = {"menu_items":8,"sub_category":4,"category":4,"weekday":2,"day_type":2,"holiday_type":2,"meal_day":2}
 
@@ -41,12 +45,22 @@ def artifacts_exist(ck, encoder_columns):
     return all(os.path.exists(_ap(ck,f)) for f in fns)
 
 # ── cache ──
+# _C is shared across all Streamlit sessions in the same Python process.
+# Two threads racing on first load could both miss the `not in` check and
+# both call fn() (e.g. tf.keras.models.load_model). Guard the slow path
+# with concurrency.cache_lock; fast path stays lock-free.
+from concurrency import cache_lock as _cache_lock
+
 _C={}
 def clear_cache(ck=None):
-    if ck: [_C.pop(k) for k in [k for k in _C if k.startswith(f"{ck}:")]]
-    else: _C.clear()
+    with _cache_lock():
+        if ck: [_C.pop(k) for k in [k for k in _C if k.startswith(f"{ck}:")]]
+        else: _C.clear()
 def _lc(k,fn):
-    if k not in _C: _C[k]=fn()
+    if k in _C: return _C[k]
+    with _cache_lock():
+        if k not in _C:
+            _C[k]=fn()
     return _C[k]
 
 def load_model(ck): return _lc(f"{ck}:mdl", lambda: tf.keras.models.load_model(_ap(ck,"per_pax_tf_model.keras")))
