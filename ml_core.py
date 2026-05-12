@@ -93,7 +93,9 @@ def fallback_by_sub(sub,le,i2s):
 
 # ── dataset ──
 def load_dataset(ck, path, logic):
-    df=pd.read_excel(path)
+    from client_database import CLIENT_DB
+    sheet = CLIENT_DB.get(ck, {}).get("sheet", 0)
+    df=pd.read_excel(path, sheet_name=sheet)
     df.columns=df.columns.str.strip().str.lower().str.replace(" ","_")
     dispatch={"category":logic.canonicalize_category,"day_type":logic.canonicalize_day_type,"holiday_type":logic.canonicalize_holiday_type,"meal_day":logic.canonicalize_meal_day}
     for c in ["menu_items","sub_category","category","day_type","holiday_type","meal_day","meal_type"]:
