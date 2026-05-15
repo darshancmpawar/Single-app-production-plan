@@ -2,155 +2,308 @@
 Planner — production plan builders supporting all client vendor MG methods.
 
 Supports: tekion_2group, 3group, day_based, toasttab_formula, and None.
-All functions take a logic object so business rules are pluggable.
+All functions receive a logic object so business rules are pluggable per client.
+
+Glossary:
+  MG  — meal group count (number of people eating that meal)
+  PP  — per-pax quantity (portion size per person)
+  veg_mg / nonveg_mg  — separate MG figures for veg vs non-veg tracks
+  Ordered Qty = Vendor PP × Vendor MG  (what the kitchen actually prepares)
 """
-import math, pandas as pd
+import math
+import pandas as pd
 from ml_core import norm, cats_match
 
-def mg5(x): return int(round(x/5.0)*5)
-def ceil5(x): return int(math.ceil(x/5.0)*5)
-def r005(v): return round(v*200)/200.0
-def vpp(pp,bump): return math.ceil((pp+bump)*100)/100.0
-def gavg(entries,key="Vendor MG"): return sum(e[key] for e in entries)/len(entries) if entries else 0
 
-def classify(results, nv_cat, stars):
-    nv=[r for r in results if cats_match(r["Category"],nv_cat)]
-    st=[r for r in results if norm(r["Category"]) in stars]
-    rest=[r for r in results if r not in nv and r not in st]
-    return nv,st,rest
+# ── Rounding helpers ──────────────────────────────────────────────────────────
+# Each helper is a single rounding/ceiling rule used across plan builders.
 
-# ── build one result row ──
-def build_row(pp,tq,cat,item,is_nv_day,nv_cat,logic):
-    is_biry=(is_nv_day and nv_cat and norm(cat)==norm(nv_cat) and norm(nv_cat)=="non veg biryani")
-    bump=logic.biryani_bump if is_biry else logic.default_bump
-    vp=vpp(pp,bump); vmg=tq/max(vp,1e-9)
-    return {"Category":cat,"Item":item,"Client PP":pp,"Vendor PP":vp,"Total Qty":tq,"Vendor MG":vmg}
+def round_to_nearest_5(x):
+    """Round x to the nearest multiple of 5 (used for MG figures)."""
+    return int(round(x / 5.0) * 5)
 
-# ── client plan ──
+def ceil_to_next_5(x):
+    """Ceiling x up to the next multiple of 5 (ensures MG never undershoots)."""
+    return int(math.ceil(x / 5.0) * 5)
+
+def round_to_005(v):
+    """Round v to the nearest 0.005 (used for Vendor PP in day_based plans)."""
+    return round(v * 200) / 200.0
+
+def vendor_pp_from_bump(client_pp, bump):
+    """
+    Vendor PP = ceil((client_pp + bump) × 100) / 100.
+    The bump adds a small safety margin above the model's client PP estimate.
+    """
+    return math.ceil((client_pp + bump) * 100) / 100.0
+
+def avg_vendor_mg(rows, key="Vendor MG"):
+    """Average Vendor MG across a list of result dicts; returns 0 for empty list."""
+    return sum(r[key] for r in rows) / len(rows) if rows else 0
+
+
+# ── Category classification ───────────────────────────────────────────────────
+
+def classify_rows(results, nonveg_cat, star_cats):
+    """
+    Split result rows into three tracks used by vendor MG formulas:
+      nonveg_rows  — rows whose category matches the non-veg category
+      star_rows    — rows in the client's star (premium) categories
+      rest_rows    — everything else
+    """
+    nonveg_rows = [r for r in results if cats_match(r["Category"], nonveg_cat)]
+    star_rows   = [r for r in results if norm(r["Category"]) in star_cats]
+    rest_rows   = [r for r in results if r not in nonveg_rows and r not in star_rows]
+    return nonveg_rows, star_rows, rest_rows
+
+
+# ── Single result row ─────────────────────────────────────────────────────────
+
+def build_row(client_pp, total_qty, category, item, is_nonveg_day, nonveg_cat, logic):
+    """
+    Build one prediction result dict.
+
+    Vendor PP = client_pp + bump (biryani gets a larger bump on non-veg days).
+    Vendor MG = total_qty / vendor_pp  (back-calculated from the total).
+    """
+    is_biryani = (
+        is_nonveg_day
+        and nonveg_cat
+        and norm(category) == norm(nonveg_cat)
+        and norm(nonveg_cat) == "non veg biryani"
+    )
+    bump       = logic.biryani_bump if is_biryani else logic.default_bump
+    vendor_pp  = vendor_pp_from_bump(client_pp, bump)
+    vendor_mg  = total_qty / max(vendor_pp, 1e-9)   # guard against divide-by-zero
+    return {
+        "Category":  category,
+        "Item":      item,
+        "Client PP": client_pp,
+        "Vendor PP": vendor_pp,
+        "Total Qty": total_qty,
+        "Vendor MG": vendor_mg,
+    }
+
+
+# ── Client plan ───────────────────────────────────────────────────────────────
+
 def client_plan(df):
-    return df[["Category","Item","Client PP","Total Qty"]].copy()
+    """Standard client plan: category, item, client PP, and total qty columns."""
+    return df[["Category", "Item", "Client PP", "Total Qty"]].copy()
 
-# ── fixed-PP client plan (Odessia) ──
-def fixed_pp_client_plan(df, fpp_map, mg):
-    p=df[["Category","Item"]].copy()
-    p["Client PP"]=p["Category"].map(lambda c: fpp_map.get(norm(c),0.10))
-    p["Total Qty"]=(p["Client PP"]*mg).round(1)
-    return p
 
-# ══════════════ VENDOR MG COMPUTATION ══════════════
+def fixed_pp_client_plan(df, fixed_pp_map, meal_group):
+    """
+    Fixed-PP client plan for clients like Odessia that use a lookup table
+    instead of model-predicted PP values.
+    """
+    plan = df[["Category", "Item"]].copy()
+    plan["Client PP"] = plan["Category"].map(
+        lambda cat: fixed_pp_map.get(norm(cat), 0.10)
+    )
+    plan["Total Qty"] = (plan["Client PP"] * meal_group).round(1)
+    return plan
 
-def _tekion_vendor_mgs(results, is_nv, nv_cat, logic):
-    """Tekion: (star+remaining)/2 for veg, separate nonveg track, tier adjust, floor check."""
-    nv,st,rest=classify(results,nv_cat,logic.star_categories)
-    raw_veg=(gavg(st)+gavg(rest))/2; raw_nv=gavg(nv)
-    fv=raw_veg if is_nv else max(logic.adjust_vendor_mg(raw_veg),0)
-    fnv=max(logic.adjust_nonveg_vendor_mg(raw_nv),0)
-    return fv,fnv
 
-def _3group_vendor_mg(results, nv_cat, logic):
-    """Odessia/Rippling: (nonveg+star+remaining)/3, single tier adjust."""
-    nv,st,rest=classify(results,nv_cat,logic.star_categories)
-    raw=(gavg(nv)+gavg(st)+gavg(rest))/3
-    return max(logic.adjust_vendor_mg(raw),0)
+# ═══════════════════════════════════════════════════════════════════════════════
+# VENDOR MG COMPUTATION — per-method implementations
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def _day_vendor_mg(client_mg, weekday, logic):
-    """Stripe: day-based percentage reduction."""
-    pct=logic.day_reductions.get(norm(weekday),0.22)
-    return client_mg*(1-pct)
+def _tekion_vendor_mgs(results, is_nonveg_day, nonveg_cat, logic):
+    """
+    Tekion 2-group formula:
+      Veg MG   = (avg star MG + avg rest MG) / 2   then tier-adjusted
+      Nonveg MG = avg nonveg MG                     then tier-adjusted
+    On non-veg days the veg MG skips the tier adjustment to avoid double-penalising.
+    """
+    nonveg_rows, star_rows, rest_rows = classify_rows(results, nonveg_cat, logic.star_categories)
 
-# ── vendor plan builder ──
-def vendor_plan(df, results, cmg, is_nv, nv_cat, logic, weekday=None):
-    method=logic.vendor_mg_method
-    if method=="tekion_2group":
-        fv,fnv=_tekion_vendor_mgs(results,is_nv,nv_cat,logic)
-        nv_rows,_,_=classify(results,nv_cat,logic.star_categories)
-        vmg=mg5(fv); nvmg=mg5(fnv) if (is_nv and nv_rows) else 0
-        mn=logic.vendor_floor_ratio*cmg
-        if (vmg+nvmg)<mn: vmg=ceil5(vmg+(mn-vmg-nvmg))
-        vp=df.copy()
-        vp["Ordered Qty"]=vp.apply(lambda r:max((nvmg if(is_nv and nv_rows and cats_match(r["Category"],nv_cat)) else vmg)*r["Vendor PP"],r["Total Qty"]),axis=1).round(1)
-        vp=vp[["Category","Item","Vendor PP","Ordered Qty"]]
-        return vp,vmg,nvmg
-    elif method=="3group":
-        fmg=_3group_vendor_mg(results,nv_cat,logic)
-        vmg=mg5(fmg)
-        vp=df.copy()
-        vp["Ordered Qty"]=vp.apply(lambda r:max(r["Vendor PP"]*vmg,r["Total Qty"]),axis=1).round(1)
-        vp=vp[["Category","Item","Vendor PP","Ordered Qty"]]
-        return vp,vmg,0
-    elif method=="day_based":
-        raw = _day_vendor_mg(cmg, weekday, logic)
-        vmg = max(5, mg5(raw))  # prevent zero/negative MG
+    raw_veg_mg    = (avg_vendor_mg(star_rows) + avg_vendor_mg(rest_rows)) / 2
+    raw_nonveg_mg = avg_vendor_mg(nonveg_rows)
 
-        # For day_based, Vendor PP = total_qty / vendor_mg
-        vp = df.copy()
-        vp["Vendor PP"] = vp["Total Qty"].apply(lambda tq: r005(tq / vmg))
-        vp["Ordered Qty"] = (vp["Vendor PP"] * vmg).round(1)
-        vp["Ordered Qty"] = vp.apply(lambda r: max(r["Ordered Qty"], r["Total Qty"]), axis=1)
-        vp = vp[["Category", "Item", "Vendor PP", "Ordered Qty"]]
-        return vp, vmg, 0
+    # On non-veg days, pass veg MG through unadjusted — the kitchen is splitting
+    # its capacity; adjusting it again would under-order.
+    final_veg_mg    = raw_veg_mg if is_nonveg_day else max(logic.adjust_vendor_mg(raw_veg_mg), 0)
+    final_nonveg_mg = max(logic.adjust_nonveg_vendor_mg(raw_nonveg_mg), 0)
+    return final_veg_mg, final_nonveg_mg
 
-    return df,0,0
 
-# ── aggressive plan builder ──
-def aggressive_plan(vplan, results, final_vmg, avg_nv, is_nv, nv_cat, logic, method_groups=2):
-    eff=set(logic.star_categories)
-    if nv_cat: eff.add(norm(nv_cat))
-    ag=vplan.copy()
-    ag["Ordered Qty"]=ag.apply(
-        lambda r: logic.aggressive_bump(r["Ordered Qty"]) if norm(r["Category"]) in eff else r["Ordered Qty"],
-        axis=1
+def _3group_vendor_mg(results, nonveg_cat, logic):
+    """
+    Odessia / Rippling 3-group formula:
+      MG = (avg nonveg MG + avg star MG + avg rest MG) / 3  then tier-adjusted
+    """
+    nonveg_rows, star_rows, rest_rows = classify_rows(results, nonveg_cat, logic.star_categories)
+    raw_mg = (avg_vendor_mg(nonveg_rows) + avg_vendor_mg(star_rows) + avg_vendor_mg(rest_rows)) / 3
+    return max(logic.adjust_vendor_mg(raw_mg), 0)
+
+
+def _day_based_vendor_mg(client_mg, weekday, logic):
+    """
+    Stripe day-based formula:
+      Vendor MG = client MG × (1 - weekday_reduction_pct)
+    Each weekday has a configured reduction percentage reflecting lower/higher demand.
+    """
+    reduction_pct = logic.day_reductions.get(norm(weekday), 0.22)
+    return client_mg * (1 - reduction_pct)
+
+
+# ── Vendor plan builder (dispatches to the correct method) ───────────────────
+
+def vendor_plan(df, results, client_mg, is_nonveg_day, nonveg_cat, logic, weekday=None):
+    """
+    Build the vendor plan DataFrame and return (plan_df, veg_mg, nonveg_mg).
+
+    Ordered Qty = max(Vendor PP × Vendor MG, Total Qty)
+    — the kitchen must always cook at least the client's guaranteed quantity.
+    """
+    method = logic.vendor_mg_method
+
+    if method == "tekion_2group":
+        final_veg_mg, final_nonveg_mg = _tekion_vendor_mgs(
+            results, is_nonveg_day, nonveg_cat, logic
+        )
+        nonveg_rows, _, _ = classify_rows(results, nonveg_cat, logic.star_categories)
+
+        veg_mg    = round_to_nearest_5(final_veg_mg)
+        nonveg_mg = round_to_nearest_5(final_nonveg_mg) if (is_nonveg_day and nonveg_rows) else 0
+
+        # Floor check: combined MG must not fall below vendor_floor_ratio × client MG.
+        min_combined_mg = logic.vendor_floor_ratio * client_mg
+        if (veg_mg + nonveg_mg) < min_combined_mg:
+            shortfall = min_combined_mg - veg_mg - nonveg_mg
+            veg_mg    = ceil_to_next_5(veg_mg + shortfall)
+
+        plan = df.copy()
+        plan["Ordered Qty"] = plan.apply(
+            lambda row: max(
+                (nonveg_mg if (is_nonveg_day and nonveg_rows and cats_match(row["Category"], nonveg_cat))
+                 else veg_mg)
+                * row["Vendor PP"],
+                row["Total Qty"],
+            ),
+            axis=1,
+        ).round(1)
+        plan = plan[["Category", "Item", "Vendor PP", "Ordered Qty"]]
+        return plan, veg_mg, nonveg_mg
+
+    elif method == "3group":
+        final_mg = _3group_vendor_mg(results, nonveg_cat, logic)
+        vendor_mg = round_to_nearest_5(final_mg)
+
+        plan = df.copy()
+        plan["Ordered Qty"] = plan.apply(
+            lambda row: max(row["Vendor PP"] * vendor_mg, row["Total Qty"]), axis=1
+        ).round(1)
+        plan = plan[["Category", "Item", "Vendor PP", "Ordered Qty"]]
+        return plan, vendor_mg, 0
+
+    elif method == "day_based":
+        raw_mg    = _day_based_vendor_mg(client_mg, weekday, logic)
+        vendor_mg = max(5, round_to_nearest_5(raw_mg))   # never let MG drop to zero
+
+        # For day_based, Vendor PP is derived from the total rather than set by bump.
+        plan = df.copy()
+        plan["Vendor PP"]   = plan["Total Qty"].apply(lambda tq: round_to_005(tq / vendor_mg))
+        plan["Ordered Qty"] = (plan["Vendor PP"] * vendor_mg).round(1)
+        # Still ensure ordered qty never falls below the client's guaranteed total.
+        plan["Ordered Qty"] = plan.apply(
+            lambda row: max(row["Ordered Qty"], row["Total Qty"]), axis=1
+        )
+        plan = plan[["Category", "Item", "Vendor PP", "Ordered Qty"]]
+        return plan, vendor_mg, 0
+
+    # Unknown method — return df unchanged with zero MGs.
+    return df, 0, 0
+
+
+# ── Aggressive plan builder ───────────────────────────────────────────────────
+
+def aggressive_plan(vendor_df, results, final_veg_mg, avg_nonveg_mg,
+                    is_nonveg_day, nonveg_cat, logic, method_groups=2):
+    """
+    Aggressive plan: bump ordered qty for star/nonveg categories, then
+    back-calculate adjusted Vendor MG and Vendor PP.
+
+    The adjusted MG figures are what the vendor commits to (higher than the
+    standard vendor plan, reflecting the premium categories' extra demand).
+
+    method_groups=2  → Tekion-style: veg and nonveg MGs computed separately
+    method_groups=3  → 3-group style: single blended MG
+    """
+    # Which categories get a bump: star + non-veg (if applicable).
+    bumped_cats = set(logic.star_categories)
+    if nonveg_cat:
+        bumped_cats.add(norm(nonveg_cat))
+
+    plan = vendor_df.copy()
+    plan["Ordered Qty"] = plan.apply(
+        lambda row: logic.aggressive_bump(row["Ordered Qty"])
+        if norm(row["Category"]) in bumped_cats
+        else row["Ordered Qty"],
+        axis=1,
     ).round(1)
 
-    def _safe_div(a, b):
-        return (a / b) if (b is not None and b > 0) else 0
+    def _safe_div(numerator, denominator):
+        return (numerator / denominator) if (denominator is not None and denominator > 0) else 0
 
-    ag["AMG"] = ag.apply(lambda r: _safe_div(r["Ordered Qty"], r["Vendor PP"]), axis=1)
+    # AMG = back-calculated MG from the bumped ordered qty.
+    plan["AMG"] = plan.apply(lambda row: _safe_div(row["Ordered Qty"], row["Vendor PP"]), axis=1)
 
-    if nv_cat:
-        nva=ag[ag["Category"].notna() & ag["Category"].str.strip().str.lower().eq(norm(nv_cat))]
+    # Re-classify the bumped plan rows for MG averaging.
+    if nonveg_cat:
+        nonveg_agg = plan[plan["Category"].notna() & plan["Category"].str.strip().str.lower().eq(norm(nonveg_cat))]
     else:
-        nva=pd.DataFrame(columns=ag.columns)
+        nonveg_agg = pd.DataFrame(columns=plan.columns)
+    star_agg = plan[plan["Category"].str.lower().str.strip().isin(logic.star_categories)]
+    rest_agg = plan[~plan.index.isin(nonveg_agg.index) & ~plan.index.isin(star_agg.index)]
 
-    sta=ag[ag["Category"].str.lower().str.strip().isin(logic.star_categories)]
-    rsa=ag[~ag.index.isin(nva.index) & ~ag.index.isin(sta.index)]
+    def _mean_amg(subset):
+        return subset["AMG"].mean() if not subset.empty else 0
 
-    def _m(d): return d["AMG"].mean() if not d.empty else 0
-
-    if method_groups==2:
-        iam=(_m(sta)+_m(rsa))/2
-        nv_diff=_m(nva)-avg_nv; adj_nv=avg_nv-nv_diff
-        veg_diff=iam-final_vmg; adj_t=final_vmg-veg_diff
+    if method_groups == 2:
+        # Blended veg MG = average of (star AMG + rest AMG) / 2.
+        # The "adjustment" is how far the aggressive MG overshoots the standard MG;
+        # we subtract that same overshoot from the final adjusted MG so the vendor
+        # plan remains self-consistent.
+        blended_veg_amg  = (_mean_amg(star_agg) + _mean_amg(rest_agg)) / 2
+        nonveg_overshoot = _mean_amg(nonveg_agg) - avg_nonveg_mg
+        veg_overshoot    = blended_veg_amg - final_veg_mg
+        adj_combined_mg  = max(0, final_veg_mg - veg_overshoot)
+        adj_nonveg_mg    = max(0, avg_nonveg_mg - nonveg_overshoot)
     else:
-        iam=(_m(nva)+_m(sta)+_m(rsa))/3
-        diff=iam-final_vmg; adj_t=final_vmg-diff; adj_nv=0
+        # Single blended MG across all three groups.
+        blended_amg     = (_mean_amg(nonveg_agg) + _mean_amg(star_agg) + _mean_amg(rest_agg)) / 3
+        overshoot       = blended_amg - final_veg_mg
+        adj_combined_mg = max(0, final_veg_mg - overshoot)
+        adj_nonveg_mg   = 0
 
-    # guards
-    adj_t = max(0, adj_t)
-    adj_nv = max(0, adj_nv)
+    # Round both to nearest 5; ensure non-veg MG never exceeds combined MG.
+    adj_combined_mg = round_to_nearest_5(adj_combined_mg)
+    adj_nonveg_mg   = round_to_nearest_5(adj_nonveg_mg)
+    if adj_nonveg_mg > adj_combined_mg:
+        adj_nonveg_mg = adj_combined_mg
+    adj_veg_mg = adj_combined_mg - adj_nonveg_mg
 
-    adj_t = mg5(adj_t)
-    adj_nv = mg5(adj_nv)
+    # Re-derive Vendor PP from the bumped ordered qty and the adjusted MG.
+    def _recalc_vendor_pp(row):
+        category = norm(row["Category"])
+        mg_for_row = adj_nonveg_mg if (is_nonveg_day and nonveg_cat and category == norm(nonveg_cat)) \
+                     else adj_combined_mg
+        return round_to_005(_safe_div(row["Ordered Qty"], mg_for_row))
 
-    if adj_nv > adj_t:
-        adj_nv = adj_t
-
-    adj_v = adj_t - adj_nv
-
-    def _rb(r):
-        c=norm(r["Category"])
-        if is_nv and nv_cat and c==norm(nv_cat):
-            base=adj_nv
-        else:
-            base=adj_t
-        return r005(_safe_div(r["Ordered Qty"], base))
-
-    ag["Vendor PP"]=ag.apply(_rb,axis=1)
-    ag=ag[["Category","Item","Vendor PP","Ordered Qty"]]
-    return ag,adj_t,adj_nv,adj_v
+    plan["Vendor PP"] = plan.apply(_recalc_vendor_pp, axis=1)
+    plan = plan[["Category", "Item", "Vendor PP", "Ordered Qty"]]
+    return plan, adj_combined_mg, adj_nonveg_mg, adj_veg_mg
 
 
-# ── special day ──
-def special_day_mg(cmg,dt,ht,wd,logic):
-    p=logic.get_reduction_pct(dt,ht,wd)
-    return cmg*(100-p)/100.0, p
+# ── Special day MG adjustment ─────────────────────────────────────────────────
+
+def special_day_mg(client_mg, day_type, holiday_type, weekday, logic):
+    """
+    Return (adjusted_mg, reduction_pct).
+    Looks up the reduction % from the client's special-day matrix and applies it.
+    """
+    reduction_pct = logic.get_reduction_pct(day_type, holiday_type, weekday)
+    adjusted_mg   = client_mg * (100 - reduction_pct) / 100.0
+    return adjusted_mg, reduction_pct

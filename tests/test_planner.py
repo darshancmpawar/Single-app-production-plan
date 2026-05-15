@@ -8,8 +8,13 @@ import pandas as pd
 import pytest
 
 from planner import (
-    mg5, ceil5, r005, vpp, gavg,
-    classify, build_row,
+    round_to_nearest_5 as mg5,
+    ceil_to_next_5     as ceil5,
+    round_to_005       as r005,
+    vendor_pp_from_bump as vpp,
+    avg_vendor_mg      as gavg,
+    classify_rows      as classify,
+    build_row,
     client_plan, fixed_pp_client_plan,
     vendor_plan, aggressive_plan, special_day_mg,
 )
@@ -241,7 +246,7 @@ class TestFixedPpClientPlan:
             {"Category": "indian bread",  "Item": "roti"},
         ])
         fpp = {"veg dry": 0.075, "indian bread": 0.05}
-        cp = fixed_pp_client_plan(df, fpp, mg=200)
+        cp = fixed_pp_client_plan(df, fpp, meal_group=200)
         assert cp.iloc[0]["Client PP"] == 0.075
         assert cp.iloc[0]["Total Qty"] == 15.0          # 0.075 * 200
         assert cp.iloc[1]["Client PP"] == 0.05
@@ -249,7 +254,7 @@ class TestFixedPpClientPlan:
 
     def test_unknown_category_defaults(self):
         df = pd.DataFrame([{"Category": "mystery cat", "Item": "x"}])
-        cp = fixed_pp_client_plan(df, {"veg dry": 0.075}, mg=100)
+        cp = fixed_pp_client_plan(df, {"veg dry": 0.075}, meal_group=100)
         # unknown → defaults to 0.10
         assert cp.iloc[0]["Client PP"] == 0.10
         assert cp.iloc[0]["Total Qty"] == 10.0
@@ -276,7 +281,7 @@ class TestVendorPlanTekion:
 
     def test_veg_only_basic(self, logic):
         df, results = self._build(logic)
-        vp, vmg, nvmg = vendor_plan(df, results, cmg=300, is_nv=False, nv_cat=None,
+        vp, vmg, nvmg = vendor_plan(df, results, client_mg=300, is_nonveg_day=False, nonveg_cat=None,
                                     logic=logic, weekday="monday")
         assert nvmg == 0                       # no NV
         assert vmg > 0
@@ -287,13 +292,13 @@ class TestVendorPlanTekion:
         # If raw VMG falls below floor ratio * cmg, ceil5 lift kicks in
         df, results = self._build(logic)
         # cmg high enough that 0.825 * cmg > the computed vmg → floor lifts it
-        vp, vmg, nvmg = vendor_plan(df, results, cmg=400, is_nv=False, nv_cat=None,
+        vp, vmg, nvmg = vendor_plan(df, results, client_mg=400, is_nonveg_day=False, nonveg_cat=None,
                                     logic=logic, weekday="monday")
         assert vmg + nvmg >= 0.825 * 400
 
     def test_ordered_qty_never_below_total_qty(self, logic):
         df, results = self._build(logic)
-        vp, _, _ = vendor_plan(df, results, cmg=300, is_nv=False, nv_cat=None,
+        vp, _, _ = vendor_plan(df, results, client_mg=300, is_nonveg_day=False, nonveg_cat=None,
                                logic=logic, weekday="monday")
         for _, row in vp.iterrows():
             orig = df[df["Item"] == row["Item"]]["Total Qty"].iloc[0]
@@ -307,8 +312,8 @@ class TestVendorPlanTekion:
              "Client PP": 0.12, "Vendor PP": 0.13, "Total Qty": 12, "Vendor MG": 92},
         ]
         df = pd.DataFrame(df_rows)
-        vp, vmg, nvmg = vendor_plan(df, df.to_dict("records"), cmg=100,
-                                    is_nv=True, nv_cat="non veg curry",
+        vp, vmg, nvmg = vendor_plan(df, df.to_dict("records"), client_mg=100,
+                                    is_nonveg_day=True, nonveg_cat="non veg curry",
                                     logic=logic, weekday="tuesday")
         assert nvmg > 0    # NV track populated
 
@@ -327,8 +332,8 @@ class TestVendorPlan3Group:
             {"Category": "non veg curry", "Item": "z",
              "Client PP": 0.12, "Vendor PP": 0.13, "Total Qty": 12, "Vendor MG": 92},
         ])
-        vp, vmg, nvmg = vendor_plan(df, df.to_dict("records"), cmg=200,
-                                    is_nv=True, nv_cat="non veg curry",
+        vp, vmg, nvmg = vendor_plan(df, df.to_dict("records"), client_mg=200,
+                                    is_nonveg_day=True, nonveg_cat="non veg curry",
                                     logic=logic, weekday="monday")
         assert nvmg == 0          # 3group always reports nvmg = 0 (single track)
         assert vmg > 0
@@ -346,8 +351,8 @@ class TestVendorPlanDayBased:
             "Client PP": 0.05, "Vendor PP": 0.06, "Total Qty": 15, "Vendor MG": 250,
         }])
         # Monday: 0.23 reduction → 200*(1-0.23) = 154 → mg5 = 155
-        vp, vmg, nvmg = vendor_plan(df, df.to_dict("records"), cmg=200,
-                                    is_nv=False, nv_cat=None,
+        vp, vmg, nvmg = vendor_plan(df, df.to_dict("records"), client_mg=200,
+                                    is_nonveg_day=False, nonveg_cat=None,
                                     logic=logic, weekday="monday")
         assert vmg == 155
         assert nvmg == 0
@@ -358,8 +363,8 @@ class TestVendorPlanDayBased:
             "Category": "veg dry", "Item": "x",
             "Client PP": 0.05, "Vendor PP": 0.06, "Total Qty": 15, "Vendor MG": 250,
         }])
-        vp, vmg, _ = vendor_plan(df, df.to_dict("records"), cmg=200,
-                                 is_nv=False, nv_cat=None,
+        vp, vmg, _ = vendor_plan(df, df.to_dict("records"), client_mg=200,
+                                 is_nonveg_day=False, nonveg_cat=None,
                                  logic=logic, weekday="saturday")  # not in dict
         # fallback 0.22: 200*0.78 = 156 → mg5 = 155
         assert vmg == 155
@@ -372,8 +377,8 @@ class TestVendorPlanDayBased:
             "Client PP": 0.05, "Vendor PP": 0.06, "Total Qty": 1, "Vendor MG": 17,
         }])
         # cmg=1 → after reduction this becomes very small; planner enforces vmg >= 5
-        vp, vmg, _ = vendor_plan(df, df.to_dict("records"), cmg=1,
-                                 is_nv=False, nv_cat=None,
+        vp, vmg, _ = vendor_plan(df, df.to_dict("records"), client_mg=1,
+                                 is_nonveg_day=False, nonveg_cat=None,
                                  logic=logic, weekday="monday")
         assert vmg >= 5
         # Vendor PP must not be inf/nan
@@ -387,8 +392,8 @@ class TestVendorPlanDayBased:
             "Category": "veg dry", "Item": "x",
             "Client PP": 0.05, "Vendor PP": 0.06, "Total Qty": 15.0, "Vendor MG": 250,
         }])
-        vp, _, _ = vendor_plan(df, df.to_dict("records"), cmg=200,
-                               is_nv=False, nv_cat=None,
+        vp, _, _ = vendor_plan(df, df.to_dict("records"), client_mg=200,
+                               is_nonveg_day=False, nonveg_cat=None,
                                logic=logic, weekday="monday")
         assert vp.iloc[0]["Ordered Qty"] >= 15.0
 
@@ -412,8 +417,8 @@ class TestAggressivePlan:
 
     def test_star_categories_get_bumped(self, logic):
         vp, results = self._vp_results()
-        ag, *_ = aggressive_plan(vp, results, final_vmg=300, avg_nv=0,
-                                  is_nv=False, nv_cat=None, logic=logic, method_groups=2)
+        ag, *_ = aggressive_plan(vp, results, final_veg_mg=300, avg_nonveg_mg=0,
+                                  is_nonveg_day=False, nonveg_cat=None, logic=logic, method_groups=2)
         # Star (flavoured rice) row should be bumped up
         star_row = ag[ag["Category"] == "flavoured rice"].iloc[0]
         non_star_row = ag[ag["Category"] == "indian bread"].iloc[0]
@@ -423,8 +428,8 @@ class TestAggressivePlan:
     def test_outputs_are_mg5_aligned(self, logic):
         vp, results = self._vp_results()
         _, adj_t, adj_nv, adj_v = aggressive_plan(
-            vp, results, final_vmg=300, avg_nv=0,
-            is_nv=False, nv_cat=None, logic=logic, method_groups=2,
+            vp, results, final_veg_mg=300, avg_nonveg_mg=0,
+            is_nonveg_day=False, nonveg_cat=None, logic=logic, method_groups=2,
         )
         assert adj_t % 5 == 0
         assert adj_nv % 5 == 0
@@ -433,8 +438,8 @@ class TestAggressivePlan:
     def test_negative_clamped_to_zero(self, logic):
         vp, results = self._vp_results()
         _, adj_t, adj_nv, adj_v = aggressive_plan(
-            vp, results, final_vmg=-50, avg_nv=-100,
-            is_nv=False, nv_cat=None, logic=logic, method_groups=2,
+            vp, results, final_veg_mg=-50, avg_nonveg_mg=-100,
+            is_nonveg_day=False, nonveg_cat=None, logic=logic, method_groups=2,
         )
         assert adj_t >= 0 and adj_nv >= 0 and adj_v >= 0
 
@@ -446,8 +451,8 @@ class TestAggressivePlan:
         results = [{"Category": "non veg curry", "Vendor PP": 0.13,
                     "Ordered Qty": 50.0, "Total Qty": 50.0, "Vendor MG": 385}]
         ag, adj_t, adj_nv, adj_v = aggressive_plan(
-            vp, results, final_vmg=10, avg_nv=400,
-            is_nv=True, nv_cat="non veg curry", logic=logic, method_groups=2,
+            vp, results, final_veg_mg=10, avg_nonveg_mg=400,
+            is_nonveg_day=True, nonveg_cat="non veg curry", logic=logic, method_groups=2,
         )
         assert adj_nv <= adj_t
         assert adj_v == adj_t - adj_nv
@@ -456,8 +461,8 @@ class TestAggressivePlan:
         logic = ThreeGroupLogic()
         vp, results = TestAggressivePlan()._vp_results()
         _, adj_t, adj_nv, _ = aggressive_plan(
-            vp, results, final_vmg=200, avg_nv=0,
-            is_nv=False, nv_cat=None, logic=logic, method_groups=3,
+            vp, results, final_veg_mg=200, avg_nonveg_mg=0,
+            is_nonveg_day=False, nonveg_cat=None, logic=logic, method_groups=3,
         )
         # 3-group never produces a separate nv MG
         assert adj_nv == 0
@@ -470,8 +475,8 @@ class TestAggressivePlan:
         results = [{"Category": "veg dry", "Vendor PP": 0.0, "Ordered Qty": 10.0,
                     "Total Qty": 10.0, "Vendor MG": 0}]
         # Should not raise
-        aggressive_plan(vp, results, final_vmg=100, avg_nv=0,
-                        is_nv=False, nv_cat=None, logic=logic, method_groups=2)
+        aggressive_plan(vp, results, final_veg_mg=100, avg_nonveg_mg=0,
+                        is_nonveg_day=False, nonveg_cat=None, logic=logic, method_groups=2)
 
 
 # ═══════════════════════════════════════════════════════════════════════
