@@ -95,15 +95,6 @@ from concurrency import cache_lock as _cache_lock
 
 _model_cache = {}
 
-def clear_cache(ck=None):
-    with _cache_lock():
-        if ck:
-            stale = [k for k in _model_cache if k.startswith(f"{ck}:")]
-            for k in stale:
-                _model_cache.pop(k)
-        else:
-            _model_cache.clear()
-
 def _load_cached(cache_key, loader_fn):
     if cache_key in _model_cache:
         return _model_cache[cache_key]
