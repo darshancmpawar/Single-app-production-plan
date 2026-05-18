@@ -16,7 +16,7 @@ from ml_core import (
 )
 from planner import (
     build_row, client_plan, fixed_pp_client_plan, vendor_plan,
-    aggressive_plan, special_day_mg, gavg, classify, mg5,
+    aggressive_plan, special_day_mg, avg_vendor_mg, classify_rows, round_to_nearest_5,
 )
 from concurrency import predict_gate, GateBusy, MAX_CONCURRENT_PREDICTS
 
@@ -448,8 +448,8 @@ hr { border-color:var(--border) !important; opacity:.6; margin:1.1rem 0 !importa
 
 # ── helper (tekion 2-group final veg MG) ──
 def _two_group_fv(results, is_nv, nv_cat, logic):
-    nv, st2, rest = classify(results, nv_cat, logic.star_categories)
-    raw = (gavg(st2) + gavg(rest)) / 2
+    _, star_rows, rest_rows = classify_rows(results, nv_cat, logic.star_categories)
+    raw = (avg_vendor_mg(star_rows) + avg_vendor_mg(rest_rows)) / 2
     return raw if is_nv else max(logic.adjust_vendor_mg(raw), 0)
 
 
@@ -531,7 +531,7 @@ def _render_generate_production_plan_tab():
             r5 = st.checkbox("Round to nearest 5", value=True, key=k("toast_r5"))
 
         adj = L.toasttab_adjust(cmg)
-        vmg = mg5(adj) if r5 else int(adj)
+        vmg = round_to_nearest_5(adj) if r5 else int(adj)
 
         st.markdown(
             f'<div class="ctx">📆 &nbsp;<strong>{sd.strftime("%A, %d %b %Y")}</strong> &nbsp;·&nbsp; Vendor MG result</div>',
@@ -878,7 +878,7 @@ def _render_generate_production_plan_tab():
             if L.has_aggressive_plan:
                 if L.vendor_mg_method == "tekion_2group":
                     fv_mg  = _two_group_fv(results, is_nv, nv_cat, L)
-                    avg_nv = gavg([r for r in results if cats_match(r["Category"], nv_cat)])
+                    avg_nv = avg_vendor_mg([r for r in results if cats_match(r["Category"], nv_cat)])
                     ag, at, an, av = aggressive_plan(vp, results, fv_mg, avg_nv, is_nv, nv_cat, L, method_groups=2)
                 else:
                     ag, at, an, av = aggressive_plan(vp, results, vmg, 0, is_nv, nv_cat, L, method_groups=3)

@@ -103,9 +103,6 @@ class BaseLogic(ABC):
     def get_reduction_pct(self,dt,ht,wd):
         return self._REDUCTION.get((dt.strip().lower(),ht.strip().lower(),wd.strip().lower()),10)
 
-    # ── multiplier-only (Toasttab) ──
-    def get_multiplier_pp(self, cat): raise NotImplementedError
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # TEKION
