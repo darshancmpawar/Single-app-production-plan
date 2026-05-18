@@ -169,10 +169,10 @@ def vendor_plan(df, results, client_mg, is_nonveg_day, nonveg_cat, logic, weekda
         nonveg_mg = round_to_nearest_5(final_nonveg_mg) if (is_nonveg_day and nonveg_rows) else 0
 
         # Floor check: combined MG must not fall below vendor_floor_ratio × client MG.
+        # If it does, lift the veg portion so that veg_mg + nonveg_mg hits the floor.
         min_combined_mg = logic.vendor_floor_ratio * client_mg
         if (veg_mg + nonveg_mg) < min_combined_mg:
-            shortfall = min_combined_mg - veg_mg - nonveg_mg
-            veg_mg    = ceil_to_next_5(veg_mg + shortfall)
+            veg_mg = ceil_to_next_5(min_combined_mg - nonveg_mg)
 
         plan = df.copy()
         plan["Ordered Qty"] = plan.apply(

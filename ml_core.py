@@ -511,10 +511,12 @@ def predict(ck, item, menu, mg, subcat, cat, weekday, logic,
         "meal_day":      logic.canonicalize_meal_day(meal_day or "veg"),
     }
 
+    # Load all encoders before the loop — one cache lookup per column, not one per iteration.
+    encoders = {col: load_enc(ck, col) for col in feature_cols}
+
     feed = [np.array([item_idx]), np.array([co_menu_ctx])]
     for col in feature_cols:
-        le = load_enc(ck, col)
-        feed.append(np.array([encode_safe(le, feature_values.get(col, ""))]))
+        feed.append(np.array([encode_safe(encoders[col], feature_values.get(col, ""))]))
 
     # ── Run inference ─────────────────────────────────────────────────────────
     raw = model.predict(feed, verbose=0)[0][0]

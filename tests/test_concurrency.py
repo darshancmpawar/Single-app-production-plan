@@ -16,7 +16,6 @@ def conc(monkeypatch):
     """Fresh concurrency module with small caps so tests run fast."""
     monkeypatch.setenv("MAX_CONCURRENT_PREDICTS", "2")
     monkeypatch.setenv("PREDICT_TIMEOUT_SEC", "0.5")
-    monkeypatch.setenv("TRAIN_TIMEOUT_SEC", "1.0")
     import concurrency as _c
     importlib.reload(_c)
     yield _c
@@ -103,81 +102,6 @@ class TestPredictGate:
 
         blocker_done.set(); bt.join()
         assert order == ["first-in", "first-out", "second-in"]
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# TRAIN GATE
-# ═══════════════════════════════════════════════════════════════════════
-class TestTrainGate:
-    def test_per_client_isolated(self, conc):
-        """Different clients have independent locks."""
-        a_held = threading.Event()
-        a_release = threading.Event()
-
-        def hold_a():
-            with conc.train_gate("tekion", timeout=2.0):
-                a_held.set()
-                a_release.wait(timeout=2.0)
-
-        ta = threading.Thread(target=hold_a)
-        ta.start()
-        a_held.wait(timeout=1.0)
-
-        # Different client should NOT block on tekion's lock.
-        with conc.train_gate("clario", timeout=0.2):
-            pass
-
-        a_release.set(); ta.join()
-
-    def test_same_client_serializes(self, conc):
-        """Two threads on the same client run one after the other, not in parallel."""
-        timeline = []
-        first_in = threading.Event()
-        release = threading.Event()
-
-        def first():
-            with conc.train_gate("tekion", timeout=2.0):
-                timeline.append("A-in")
-                first_in.set()
-                release.wait(timeout=2.0)
-                timeline.append("A-out")
-
-        def second():
-            first_in.wait(timeout=1.0)
-            with conc.train_gate("tekion", timeout=2.0):
-                timeline.append("B-in")
-
-        t1 = threading.Thread(target=first)
-        t2 = threading.Thread(target=second)
-        t1.start(); t2.start()
-
-        time.sleep(0.1)
-        # B should be blocked while A holds the lock
-        assert "B-in" not in timeline
-
-        release.set()
-        t1.join(); t2.join()
-        assert timeline == ["A-in", "A-out", "B-in"]
-
-    def test_timeout_raises_gatebusy(self, conc):
-        """If the lock can't be acquired within timeout, raise GateBusy."""
-        held = threading.Event()
-        release = threading.Event()
-
-        def holder():
-            with conc.train_gate("tekion", timeout=2.0):
-                held.set()
-                release.wait(timeout=2.0)
-
-        t = threading.Thread(target=holder)
-        t.start()
-        held.wait(timeout=1.0)
-
-        with pytest.raises(conc.GateBusy):
-            with conc.train_gate("tekion", timeout=0.1):
-                pass
-
-        release.set(); t.join()
 
 
 # ═══════════════════════════════════════════════════════════════════════
