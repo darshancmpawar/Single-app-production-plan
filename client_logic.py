@@ -117,12 +117,12 @@ class TekionLogic(BaseLogic):
     @property
     def category_map(self): return {"indian bread":"indian bread","indian breads":"indian bread","veg dry":"veg dry","veg curry":"veg curry","gravy veg":"veg curry","flavour rice":"flavoured rice","flavoured rice":"flavoured rice","white rice":"white rice","steamed rice":"white rice","dal":"dal","sambar":"sambar","rasam":"rasam","salad":"salad","non veg biryani":"non veg biryani","non veg curry":"non veg curry"}
     def adjust_vendor_mg(self,mg):
-        if mg<350: return mg*0.95
-        elif 350<=mg<=700: return mg-15
-        else: return mg-25
+        if mg<350: return mg*0.94
+        elif 350<=mg<=700: return mg-10
+        else: return mg-20
     def adjust_nonveg_vendor_mg(self,mg):
         if mg<400: return mg*0.97
-        else: return mg-20
+        else: return mg-15
 
 # ═══════════════════════════════════════════════════════════════════════
 # CLARIO — 5-feature model, client plan only, has PP cap
