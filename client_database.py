@@ -9,7 +9,7 @@ DIR = os.path.dirname(__file__)
 
 CLIENT_DB = {
     "tekion":   {"name":"Tekion",   "dataset":os.path.join(DIR,"Tekion_dataset.xlsx"),            "has_embeddings":True},
-    "clario":   {"name":"Clario",   "dataset":os.path.join(DIR,"Clario_Wastage_dataset.xlsx"),    "has_embeddings":True, "sheet":"wastage"},
+    "clario":   {"name":"Clario",   "dataset":os.path.join(DIR,"Clario_Wastage_dataset.xlsx"),    "has_embeddings":True, "sheet":"Sheet1"},
     "odessia":  {"name":"Odessia",  "dataset":os.path.join(DIR,"Odessia Dataset.xlsx"),           "has_embeddings":True},
     "rippling": {"name":"Rippling", "dataset":os.path.join(DIR,"Rippling_Dataset.xlsx"),          "has_embeddings":True},
     "stripe":   {"name":"Stripe",   "dataset":os.path.join(DIR,"Stripe_Dataset.xlsx"),            "has_embeddings":True},

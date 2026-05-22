@@ -175,7 +175,7 @@ class TestTrainScript:
 # ═══════════════════════════════════════════════════════════════════════
 class TestLoadDatasetSheetSelection:
     def test_clario_reads_wastage_sheet_not_default(self, monkeypatch):
-        """Regression guard: clario must use sheet_name='wastage', not index 0.
+        """Regression guard: clario must use sheet_name='Sheet1', not index 0.
 
         Sheet2 (index 0) in Clario_Wastage_dataset.xlsx is a pivot summary
         with unnamed columns; reading it would fail schema validation.
@@ -205,8 +205,8 @@ class TestLoadDatasetSheetSelection:
 
         ml_core.load_dataset("clario", "fake_path.xlsx", _MockLogic())
 
-        assert captured.get("sheet_name") == "wastage", (
-            f"Expected sheet_name='wastage', got {captured.get('sheet_name')!r}. "
+        assert captured.get("sheet_name") == "Sheet1", (
+            f"Expected sheet_name='Sheet1', got {captured.get('sheet_name')!r}. "
             "Check client_database.py 'sheet' key and ml_core.load_dataset."
         )
 
