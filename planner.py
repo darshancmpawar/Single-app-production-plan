@@ -185,7 +185,10 @@ def vendor_plan(df, results, client_mg, is_nonveg_day, nonveg_cat, logic, weekda
             axis=1,
         ).round(1)
         plan = plan[["Category", "Item", "Vendor PP", "Ordered Qty"]]
-        return plan, veg_mg, nonveg_mg
+        # Return the net veg-only allocation (veg_mg − nonveg_mg) so the chip label
+        # matches the client plan convention ("Veg MG" = headcount for pure-veg eaters).
+        # Ordered qty for veg rows still uses the full veg_mg internally (above).
+        return plan, max(0, veg_mg - nonveg_mg), nonveg_mg
 
     elif method == "3group":
         final_mg = _3group_vendor_mg(results, nonveg_cat, logic)
