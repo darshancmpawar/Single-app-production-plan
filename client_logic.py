@@ -117,15 +117,15 @@ class TekionLogic(BaseLogic):
     @property
     def category_map(self): return {"indian bread":"indian bread","indian breads":"indian bread","veg dry":"veg dry","veg curry":"veg curry","gravy veg":"veg curry","flavour rice":"flavoured rice","flavoured rice":"flavoured rice","white rice":"white rice","steamed rice":"white rice","dal":"dal","sambar":"sambar","rasam":"rasam","salad":"salad","non veg biryani":"non veg biryani","non veg curry":"non veg curry"}
     def adjust_vendor_mg(self,mg):
-        if mg<350: return mg*0.95
-        elif 350<=mg<=700: return mg-15
-        else: return mg-25
+        if mg<350: return mg*0.94
+        elif 350<=mg<=700: return mg-10
+        else: return mg-20
     def adjust_nonveg_vendor_mg(self,mg):
         if mg<400: return mg*0.97
-        else: return mg-20
+        else: return mg-15
 
 # ═══════════════════════════════════════════════════════════════════════
-# CLARIO — 5-feature model, client plan only, has PP cap
+# CLARIO — 5-feature model, tekion-2group vendor MG, nonveg-capable
 # ═══════════════════════════════════════════════════════════════════════
 class ClarioLogic(BaseLogic):
     @property
@@ -135,7 +135,7 @@ class ClarioLogic(BaseLogic):
     @property
     def star_categories(self): return {"flavoured rice","veg gravy"}
     @property
-    def category_map(self): 
+    def category_map(self):
         return {
             "indian bread":"indian bread",
             "indian breads":"indian bread",
@@ -156,13 +156,21 @@ class ClarioLogic(BaseLogic):
         }
 
     @property
-    def has_vendor_plan(self): return False
-    @property
-    def has_aggressive_plan(self): return False
-    @property
     def has_special_day(self): return False
     @property
-    def vendor_mg_method(self): return None
+    def vendor_mg_method(self): return "tekion_2group"
+    @property
+    def default_mg(self): return 130
+
+    # Clario operates in the 40–240 MG range (median ~130).
+    def adjust_vendor_mg(self, mg):
+        if mg < 80:          return mg * 0.94
+        elif 80 <= mg <= 160: return mg - 5
+        else:                 return mg - 8
+
+    def adjust_nonveg_vendor_mg(self, mg):
+        if mg < 80: return mg * 0.97
+        else:       return mg - 5
 
 # ═══════════════════════════════════════════════════════════════════════
 # ODESSIA — 6-feature, 3-group vendor MG, fixed PP client plan
@@ -245,7 +253,7 @@ class StripeLogic(BaseLogic):
     def day_reductions(self): return {"monday":0.23,"tuesday":0.21,"wednesday":0.21,"thursday":0.22,"friday":0.23}
 
 # ═══════════════════════════════════════════════════════════════════════
-# TESSOLVE — 4-feature model, veg only, client plan only
+# TESSOLVE — 4-feature model, veg only, tekion-2group vendor MG
 # ═══════════════════════════════════════════════════════════════════════
 class TessolveLogic(BaseLogic):
     @property
@@ -257,13 +265,19 @@ class TessolveLogic(BaseLogic):
     @property
     def has_nonveg_toggle(self): return False
     @property
-    def has_vendor_plan(self): return False
-    @property
-    def has_aggressive_plan(self): return False
+    def has_separate_nonveg_mg(self): return False
     @property
     def has_special_day(self): return False
     @property
-    def vendor_mg_method(self): return None
+    def vendor_mg_method(self): return "tekion_2group"
+    @property
+    def default_mg(self): return 570
+
+    # Tessolve operates in the 75–650 MG range (median ~570).
+    def adjust_vendor_mg(self, mg):
+        if mg < 300:           return mg * 0.94
+        elif 300 <= mg <= 600: return mg - 10
+        else:                  return mg - 20
 
 # ═══════════════════════════════════════════════════════════════════════
 # TOASTTAB — multiplier only, no ML
