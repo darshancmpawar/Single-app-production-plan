@@ -171,6 +171,78 @@ class TestTrainScript:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# ml_core.load_dataset — sheet selection
+# ═══════════════════════════════════════════════════════════════════════
+class TestLoadDatasetSheetSelection:
+    def test_clario_reads_wastage_sheet_not_default(self, monkeypatch):
+        """Regression guard: clario must use sheet_name='wastage', not index 0.
+
+        Sheet2 (index 0) in Clario_Wastage_dataset.xlsx is a pivot summary
+        with unnamed columns; reading it would fail schema validation.
+        """
+        import pandas as pd
+        import ml_core
+
+        captured = {}
+
+        def fake_read_excel(path, sheet_name=0):
+            captured["sheet_name"] = sheet_name
+            return pd.DataFrame({
+                "date":         ["2025-01-06"],
+                "menu_items":   ["rice"],
+                "sub_category": ["grains"],
+                "category":     ["veg"],
+                "ideal_pp":     [0.25],
+            })
+
+        monkeypatch.setattr(ml_core.pd, "read_excel", fake_read_excel)
+
+        class _MockLogic:
+            def canonicalize_category(self, v):     return v
+            def canonicalize_day_type(self, v):     return v
+            def canonicalize_holiday_type(self, v): return v
+            def canonicalize_meal_day(self, v):     return v
+
+        ml_core.load_dataset("clario", "fake_path.xlsx", _MockLogic())
+
+        assert captured.get("sheet_name") == "wastage", (
+            f"Expected sheet_name='wastage', got {captured.get('sheet_name')!r}. "
+            "Check client_database.py 'sheet' key and ml_core.load_dataset."
+        )
+
+    def test_clients_without_sheet_key_use_default_index(self, monkeypatch):
+        """Clients with no 'sheet' key must fall back to sheet index 0."""
+        import pandas as pd
+        import ml_core
+
+        captured = {}
+
+        def fake_read_excel(path, sheet_name=0):
+            captured["sheet_name"] = sheet_name
+            return pd.DataFrame({
+                "date":         ["2025-01-06"],
+                "menu_items":   ["rice"],
+                "sub_category": ["grains"],
+                "category":     ["veg"],
+                "ideal_pp":     [0.25],
+            })
+
+        monkeypatch.setattr(ml_core.pd, "read_excel", fake_read_excel)
+
+        class _MockLogic:
+            def canonicalize_category(self, v):     return v
+            def canonicalize_day_type(self, v):     return v
+            def canonicalize_holiday_type(self, v): return v
+            def canonicalize_meal_day(self, v):     return v
+
+        ml_core.load_dataset("tekion", "fake_path.xlsx", _MockLogic())
+
+        assert captured.get("sheet_name") == 0, (
+            f"Expected sheet_name=0 (default), got {captured.get('sheet_name')!r}."
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # app.py UX — _ensure() must NOT train at runtime anymore
 # ═══════════════════════════════════════════════════════════════════════
 class TestAppDoesNotTrain:
