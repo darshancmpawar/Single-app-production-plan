@@ -242,6 +242,8 @@ def _render_generate_production_plan_tab():
     # ── NON-VEG ITEMS ───────────────────────────────────────────────────
     if show_nv:
         nv_opts = get_nv_cats(CK, INFO["dataset"], L) if INFO.get("dataset") else []
+        if not nv_opts:
+            nv_opts = list(getattr(L, "nonveg_cats", []))
         if nv_opts:
             st.markdown('<div class="sec"><span class="sec-icon">🍗</span><span class="sec-label">Non-Veg Items</span></div>', unsafe_allow_html=True)
             is_biryani_day = False
