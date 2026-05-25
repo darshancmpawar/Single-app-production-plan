@@ -242,6 +242,10 @@ class StripeLogic(BaseLogic):
     @property
     def category_map(self): return {"indian breads":"indian bread","indian bread":"indian bread","veg dry":"veg dry","gravy veg":"veg curry","veg curry":"veg curry","flavoured rice":"flavoured rice","steamed rice":"white rice","white rice":"white rice","dal":"dal","sambar":"sambar","rasam":"rasam","non veg dry":"non veg dry","non veg gravy":"non veg gravy","non veg biryani":"non veg biryani"}
     @property
+    def custom_nonveg_mode(self): return "Required"
+    @property
+    def nonveg_cats(self): return ["non veg dry","non veg gravy"]
+    @property
     def vendor_mg_method(self): return "day_based"
     @property
     def nonveg_item_count(self): return 2
