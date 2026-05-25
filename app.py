@@ -26,7 +26,7 @@ logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
 # ═══════════════ PAGE CONFIG — must be the first Streamlit call ═══════════════
 st.set_page_config(
-    page_title="Production Planner",
+    page_title="Production Plan",
     page_icon="🍽️",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -51,7 +51,7 @@ st.markdown("""
 <div class="app-header">
     <div class="app-header-icon">🍽️</div>
     <div class="app-header-text">
-        <div class="app-title">Per Pax Production Planner</div>
+        <div class="app-title">Production Plan</div>
         <div class="app-sub">Cafeteria AI &nbsp;·&nbsp; Real-time menu intelligence &amp; operational planning</div>
     </div>
 </div>
@@ -423,7 +423,7 @@ def _render_generate_production_plan_tab():
             st.stop()
 
         df = pd.DataFrame(results)
-        df["Total Qty"] = df["Total Qty"].round(1)
+        df["Total Qty(kg)"] = df["Total Qty(kg)"].round(1)
         df["Vendor MG"] = df["Vendor MG"].round(0)
 
         # ── CLIENT PLAN ─────────────────────────────────────────────────
@@ -446,7 +446,7 @@ def _render_generate_production_plan_tab():
             f'<div class="plan-chips">{mg_chips}</div></div>',
             unsafe_allow_html=True,
         )
-        st.dataframe(fmt_cols(cp, ["Client PP", "Total Qty"]), use_container_width=True, hide_index=True)
+        st.dataframe(fmt_cols(cp, ["Per Pax Qty(g)", "Total Qty(kg)"]), use_container_width=True, hide_index=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         # ── VENDOR PLAN ─────────────────────────────────────────────────

@@ -78,9 +78,9 @@ def build_row(client_pp, total_qty, category, item, is_nonveg_day, nonveg_cat, l
     return {
         "Category":  category,
         "Item":      item,
-        "Client PP": client_pp,
+        "Per Pax Qty(g)": client_pp,
         "Vendor PP": vendor_pp,
-        "Total Qty": total_qty,
+        "Total Qty(kg)": total_qty,
         "Vendor MG": vendor_mg,
     }
 
@@ -89,7 +89,7 @@ def build_row(client_pp, total_qty, category, item, is_nonveg_day, nonveg_cat, l
 
 def client_plan(df):
     """Standard client plan: category, item, client PP, and total qty columns."""
-    return df[["Category", "Item", "Client PP", "Total Qty"]].copy()
+    return df[["Category", "Item", "Per Pax Qty(g)", "Total Qty(kg)"]].copy()
 
 
 def fixed_pp_client_plan(df, fixed_pp_map, meal_group):
@@ -98,10 +98,10 @@ def fixed_pp_client_plan(df, fixed_pp_map, meal_group):
     instead of model-predicted PP values.
     """
     plan = df[["Category", "Item"]].copy()
-    plan["Client PP"] = plan["Category"].map(
+    plan["Per Pax Qty(g)"] = plan["Category"].map(
         lambda cat: fixed_pp_map.get(norm(cat), 0.10)
     )
-    plan["Total Qty"] = (plan["Client PP"] * meal_group).round(1)
+    plan["Total Qty(kg)"] = (plan["Per Pax Qty(g)"] * meal_group).round(1)
     return plan
 
 
@@ -154,7 +154,7 @@ def vendor_plan(df, results, client_mg, is_nonveg_day, nonveg_cat, logic, weekda
     """
     Build the vendor plan DataFrame and return (plan_df, veg_mg, nonveg_mg).
 
-    Ordered Qty = max(Vendor PP × Vendor MG, Total Qty)
+    Ordered Qty = max(Vendor PP × Vendor MG, Total Qty(kg))
     — the kitchen must always cook at least the client's guaranteed quantity.
     """
     method = logic.vendor_mg_method
@@ -180,7 +180,7 @@ def vendor_plan(df, results, client_mg, is_nonveg_day, nonveg_cat, logic, weekda
                 (nonveg_mg if (is_nonveg_day and nonveg_rows and cats_match(row["Category"], nonveg_cat))
                  else veg_mg)
                 * row["Vendor PP"],
-                row["Total Qty"],
+                row["Total Qty(kg)"],
             ),
             axis=1,
         ).round(1)
@@ -196,7 +196,7 @@ def vendor_plan(df, results, client_mg, is_nonveg_day, nonveg_cat, logic, weekda
 
         plan = df.copy()
         plan["Ordered Qty"] = plan.apply(
-            lambda row: max(row["Vendor PP"] * vendor_mg, row["Total Qty"]), axis=1
+            lambda row: max(row["Vendor PP"] * vendor_mg, row["Total Qty(kg)"]), axis=1
         ).round(1)
         plan = plan[["Category", "Item", "Vendor PP", "Ordered Qty"]]
         return plan, vendor_mg, 0
@@ -207,11 +207,11 @@ def vendor_plan(df, results, client_mg, is_nonveg_day, nonveg_cat, logic, weekda
 
         # For day_based, Vendor PP is derived from the total rather than set by bump.
         plan = df.copy()
-        plan["Vendor PP"]   = plan["Total Qty"].apply(lambda tq: round_to_005(tq / vendor_mg))
+        plan["Vendor PP"]   = plan["Total Qty(kg)"].apply(lambda tq: round_to_005(tq / vendor_mg))
         plan["Ordered Qty"] = (plan["Vendor PP"] * vendor_mg).round(1)
         # Still ensure ordered qty never falls below the client's guaranteed total.
         plan["Ordered Qty"] = plan.apply(
-            lambda row: max(row["Ordered Qty"], row["Total Qty"]), axis=1
+            lambda row: max(row["Ordered Qty"], row["Total Qty(kg)"]), axis=1
         )
         plan = plan[["Category", "Item", "Vendor PP", "Ordered Qty"]]
         return plan, vendor_mg, 0
