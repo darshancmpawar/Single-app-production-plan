@@ -423,7 +423,7 @@ def _render_generate_production_plan_tab():
             st.stop()
 
         df = pd.DataFrame(results)
-        df["Total Qty(kg)"] = df["Total Qty(kg)"].round(1)
+        df["Total Qty"] = df["Total Qty"].round(1)
         df["Vendor MG"] = df["Vendor MG"].round(0)
 
         # ── CLIENT PLAN ─────────────────────────────────────────────────
@@ -446,7 +446,8 @@ def _render_generate_production_plan_tab():
             f'<div class="plan-chips">{mg_chips}</div></div>',
             unsafe_allow_html=True,
         )
-        st.dataframe(fmt_cols(cp, ["Per Pax Qty(g)", "Total Qty(kg)"]), use_container_width=True, hide_index=True)
+        cp_display = cp.rename(columns={"Client PP": "Per Pax Qty(g)", "Total Qty": "Total Qty(kg)"})
+        st.dataframe(fmt_cols(cp_display, ["Per Pax Qty(g)", "Total Qty(kg)"]), use_container_width=True, hide_index=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         # ── VENDOR PLAN ─────────────────────────────────────────────────
