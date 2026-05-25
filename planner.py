@@ -78,7 +78,7 @@ def build_row(client_pp, total_qty, category, item, is_nonveg_day, nonveg_cat, l
     return {
         "Category":  category,
         "Item":      item,
-        "Client PP": client_pp,
+        "Per Pax Qty": client_pp,
         "Vendor PP": vendor_pp,
         "Total Qty": total_qty,
         "Vendor MG": vendor_mg,
@@ -89,7 +89,7 @@ def build_row(client_pp, total_qty, category, item, is_nonveg_day, nonveg_cat, l
 
 def client_plan(df):
     """Standard client plan: category, item, client PP, and total qty columns."""
-    return df[["Category", "Item", "Client PP", "Total Qty"]].copy()
+    return df[["Category", "Item", "Per Pax Qty", "Total Qty"]].copy()
 
 
 def fixed_pp_client_plan(df, fixed_pp_map, meal_group):
@@ -98,10 +98,10 @@ def fixed_pp_client_plan(df, fixed_pp_map, meal_group):
     instead of model-predicted PP values.
     """
     plan = df[["Category", "Item"]].copy()
-    plan["Client PP"] = plan["Category"].map(
+    plan["Per Pax Qty"] = plan["Category"].map(
         lambda cat: fixed_pp_map.get(norm(cat), 0.10)
     )
-    plan["Total Qty"] = (plan["Client PP"] * meal_group).round(1)
+    plan["Total Qty"] = (plan["Per Pax Qty"] * meal_group).round(1)
     return plan
 
 

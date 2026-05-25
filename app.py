@@ -446,7 +446,7 @@ def _render_generate_production_plan_tab():
             f'<div class="plan-chips">{mg_chips}</div></div>',
             unsafe_allow_html=True,
         )
-        st.dataframe(fmt_cols(cp, ["Client PP", "Total Qty"]), use_container_width=True, hide_index=True)
+        st.dataframe(fmt_cols(cp, ["Per Pax Qty", "Total Qty"]), use_container_width=True, hide_index=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         # ── VENDOR PLAN ─────────────────────────────────────────────────
