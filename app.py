@@ -442,7 +442,7 @@ def _render_generate_production_plan_tab():
             mg_chips = f'<span class="chip chip-blue">Client MG: {cmg:.0f}</span>'
 
         st.markdown(
-            f'<div class="plan-card"><span class="plan-label">📋 Client Production Plan</span>'
+            f'<div class="plan-card"><span class="plan-label">📋 Production Plan</span>'
             f'<div class="plan-chips">{mg_chips}</div></div>',
             unsafe_allow_html=True,
         )
