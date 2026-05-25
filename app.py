@@ -246,22 +246,14 @@ def _render_generate_production_plan_tab():
             nv_opts = list(getattr(L, "nonveg_cats", []))
         if nv_opts:
             st.markdown('<div class="sec"><span class="sec-icon">🍗</span><span class="sec-label">Non-Veg Items</span></div>', unsafe_allow_html=True)
-            is_biryani_day = False
-            if L.has_biryani_toggle:
-                is_biryani_day = st.toggle("🍛 Biryani Day?", value=False, key=key("is_biryani_day"))
-            nv_count = 1 if is_biryani_day else L.nonveg_item_count
-            for ni in range(nv_count):
+            for ni in range(L.nonveg_item_count):
                 nvc_col, nvi_col = st.columns(2)
                 with nvc_col:
-                    if is_biryani_day:
-                        nvc = "non veg biryani"
-                        st.text_input("Non-Veg Category", value="Non Veg Biryani", disabled=True, key=key("nvc_biryani_label"))
-                    else:
-                        nvc = st.selectbox(
-                            f"Non-Veg Category{f' #{ni + 1}' if L.nonveg_item_count > 1 else ''}",
-                            nv_opts,
-                            key=key(f"nvc_{ni}"),
-                        )
+                    nvc = st.selectbox(
+                        f"Non-Veg Category{f' #{ni + 1}' if L.nonveg_item_count > 1 else ''}",
+                        nv_opts,
+                        key=key(f"nvc_{ni}"),
+                    )
                 with nvi_col:
                     nvi = st.text_input(f"Non-Veg Item  ({nvc}):", key=key(f"nvi_{ni}"))
 
@@ -450,7 +442,7 @@ def _render_generate_production_plan_tab():
             mg_chips = f'<span class="chip chip-blue">Client MG: {cmg:.0f}</span>'
 
         st.markdown(
-            f'<div class="plan-card"><span class="plan-label">📋 Client Production Plan</span>'
+            f'<div class="plan-card"><span class="plan-label">📋 Production Plan</span>'
             f'<div class="plan-chips">{mg_chips}</div></div>',
             unsafe_allow_html=True,
         )
