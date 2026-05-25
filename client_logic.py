@@ -31,6 +31,8 @@ class BaseLogic(ABC):
     @property
     def has_nonveg_toggle(self): return True
     @property
+    def has_biryani_toggle(self): return False
+    @property
     def nonveg_item_count(self): return 1      # how many nonveg items to enter
     @property
     def has_vendor_plan(self): return True
@@ -238,13 +240,15 @@ class StripeLogic(BaseLogic):
     @property
     def star_categories(self): return {"flavoured rice","veg curry"}
     @property
-    def category_map(self): return {"indian breads":"indian bread","indian bread":"indian bread","veg dry":"veg dry","gravy veg":"veg curry","veg curry":"veg curry","flavoured rice":"flavoured rice","steamed rice":"white rice","white rice":"white rice","dal":"dal","sambar":"sambar","rasam":"rasam"}
+    def category_map(self): return {"indian breads":"indian bread","indian bread":"indian bread","veg dry":"veg dry","gravy veg":"veg curry","veg curry":"veg curry","flavoured rice":"flavoured rice","steamed rice":"white rice","white rice":"white rice","dal":"dal","sambar":"sambar","rasam":"rasam","non veg dry":"non veg dry","non veg gravy":"non veg gravy","non veg biryani":"non veg biryani"}
     @property
     def vendor_mg_method(self): return "day_based"
     @property
     def nonveg_item_count(self): return 2
     @property
     def has_nonveg_toggle(self): return False
+    @property
+    def has_biryani_toggle(self): return True
     @property
     def has_separate_nonveg_mg(self): return False
     @property
