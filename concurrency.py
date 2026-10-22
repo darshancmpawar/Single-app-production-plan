@@ -25,6 +25,14 @@ from contextlib import contextmanager
 from typing import Iterator
 
 
+# ── TUNING: how many predict loops may run at once ───────────────────────────
+# 2 is sized for the Streamlit Cloud free tier (1 CPU / 1 GB). TensorFlow
+# inference is CPU-bound, so a third concurrent loop buys no throughput and
+# pushes RSS toward the OOM killer. Raise MAX_CONCURRENT_PREDICTS only together
+# with the container's CPU/RAM.
+# 30 s timeout: one predict loop is ~1–3 s for a full menu, so a session that
+# has waited 30 s is behind a real pile-up — better a retry message than a
+# browser that looks hung.
 MAX_CONCURRENT_PREDICTS = int(os.environ.get("MAX_CONCURRENT_PREDICTS", 2))
 PREDICT_TIMEOUT_SEC     = float(os.environ.get("PREDICT_TIMEOUT_SEC", 30.0))
 

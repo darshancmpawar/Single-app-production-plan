@@ -16,7 +16,13 @@ from ml_core import norm, cats_match
 
 
 # ── Rounding helpers ──────────────────────────────────────────────────────────
-# Each helper is a single rounding/ceiling rule used across plan builders.
+# TUNING: the two granularities the whole app snaps to.
+#   MG  → multiples of 5 heads. Kitchens plan in batches, not individuals, and
+#         a headcount of 287 reads as false precision on an ops sheet.
+#   PP  → multiples of 0.005 kg (5 g). Finer than that is below what a serving
+#         spoon can distinguish, so it is noise in the plan.
+# Changing either changes every plan the app prints. Keep them in step with
+# ml_core.floor005(), which applies the same 5 g grid to model output.
 
 def round_to_nearest_5(x):
     """Round x to the nearest multiple of 5 (used for MG figures)."""
@@ -28,12 +34,15 @@ def ceil_to_next_5(x):
 
 def round_to_005(v):
     """Round v to the nearest 0.005 (used for Vendor PP in day_based plans)."""
-    return round(v * 200) / 200.0
+    return round(v * 200) / 200.0   # ×200 == ÷0.005
 
 def vendor_pp_from_bump(client_pp, bump):
     """
     Vendor PP = ceil((client_pp + bump) × 100) / 100.
-    The bump adds a small safety margin above the model's client PP estimate.
+
+    The bump (logic.default_bump / logic.biryani_bump) adds a safety margin
+    above the model's client PP. The ceil to 0.01 kg always rounds UP — never
+    to nearest — so rounding can only ever add food, never remove it.
     """
     return math.ceil((client_pp + bump) * 100) / 100.0
 
@@ -74,7 +83,10 @@ def build_row(client_pp, total_qty, category, item, is_nonveg_day, nonveg_cat, l
     )
     bump       = logic.biryani_bump if is_biryani else logic.default_bump
     vendor_pp  = vendor_pp_from_bump(client_pp, bump)
-    vendor_mg  = total_qty / max(vendor_pp, 1e-9)   # guard against divide-by-zero
+    # Back-calculate the headcount the vendor PP implies. vendor_pp is a ceil of
+    # a positive number so it is practically never 0; the epsilon only stops a
+    # ZeroDivisionError killing the whole plan if a PP of 0 ever reaches here.
+    vendor_mg  = total_qty / max(vendor_pp, 1e-9)
     return {
         "Category":  category,
         "Item":      item,
@@ -98,6 +110,9 @@ def fixed_pp_client_plan(df, fixed_pp_map, meal_group):
     instead of model-predicted PP values.
     """
     plan = df[["Category", "Item"]].copy()
+    # 0.10 kg/person for a category absent from the contract table — the middle
+    # of the observed PP range, so an un-contracted dish bills sanely instead of
+    # at zero. A category hitting this default repeatedly belongs in the map.
     plan["Client PP"] = plan["Category"].map(
         lambda cat: fixed_pp_map.get(norm(cat), 0.10)
     )
@@ -144,6 +159,9 @@ def _day_based_vendor_mg(client_mg, weekday, logic):
       Vendor MG = client MG × (1 - weekday_reduction_pct)
     Each weekday has a configured reduction percentage reflecting lower/higher demand.
     """
+    # 0.22 (22%) is the fallback for a weekday absent from the table — i.e.
+    # Saturday/Sunday, which these sites do not normally serve. It is the
+    # midpoint of the configured Mon–Fri values, so it never surprises.
     reduction_pct = logic.day_reductions.get(norm(weekday), 0.22)
     return client_mg * (1 - reduction_pct)
 
@@ -203,7 +221,9 @@ def vendor_plan(df, results, client_mg, is_nonveg_day, nonveg_cat, logic, weekda
 
     elif method == "day_based":
         raw_mg    = _day_based_vendor_mg(client_mg, weekday, logic)
-        vendor_mg = max(5, round_to_nearest_5(raw_mg))   # never let MG drop to zero
+        # Floor of 5 heads: with a small client MG the reduction can round down to
+        # 0, and a 0 MG would make every Vendor PP division below blow up.
+        vendor_mg = max(5, round_to_nearest_5(raw_mg))
 
         # For day_based, Vendor PP is derived from the total rather than set by bump.
         plan = df.copy()
@@ -250,7 +270,10 @@ def aggressive_plan(vendor_df, results, final_veg_mg, avg_nonveg_mg,
     def _safe_div(numerator, denominator):
         return (numerator / denominator) if (denominator is not None and denominator > 0) else 0
 
-    # AMG = back-calculated MG from the bumped ordered qty.
+    # AMG ("aggressive MG") = the headcount each bumped Ordered Qty implies at
+    # the unchanged Vendor PP. Bumping qty without changing PP raises the
+    # implied headcount; the rest of this function measures that rise and
+    # hands it back as a lower MG, so the extra food shows up as PP, not heads.
     plan["AMG"] = plan.apply(lambda row: _safe_div(row["Ordered Qty"], row["Vendor PP"]), axis=1)
 
     # Re-classify the bumped plan rows for MG averaging.
