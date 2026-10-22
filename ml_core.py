@@ -18,15 +18,30 @@ ARTIFACT_DIR = os.environ.get(
 )
 os.makedirs(ARTIFACT_DIR, exist_ok=True)
 
-SEED       = 42
-CTX_LEN    = 10   # max number of co-menu items kept as context per training row
-EPOCHS     = 20
-BATCH      = 32
-VAL_SPLIT  = 0.1  # fraction of training rows held out for validation during fit
-TEST_SIZE  = 0.2  # fraction of dates held out as the final test set
+# ═══ TUNING: training hyperparameters ═════════════════════════════════════════
+# These apply to EVERY client — there is one architecture, shaped per client by
+# its encoder_columns. The datasets are small (a few thousand rows each), which
+# is what every value below is sized for. Change one, then retrain all clients
+# (`python scripts/train.py --client all --force`) and compare the printed RMSE;
+# a typical per-pax RMSE is a few hundredths of a kg.
 
-# Embedding vector size per feature. Larger dim for high-cardinality features
-# (menu_items can have hundreds of values; weekday has only 7).
+SEED       = 42   # fixed so two runs on the same dataset give the same model
+CTX_LEN    = 10   # max co-menu items kept as context per row. A full menu is
+                  # 8–10 dishes, so 10 covers a day without padding waste.
+EPOCHS     = 20   # enough to converge on a few-thousand-row set; more overfits
+BATCH      = 32   # small batches — the datasets are too small for 128+
+VAL_SPLIT  = 0.1  # fraction of TRAINING rows Keras holds out to watch val_loss
+TEST_SIZE  = 0.2  # fraction of DATES held out as the final (reported) test set
+
+# TUNING: embedding width per feature, in floats. Roughly "how much the model
+# is allowed to memorise about this column". Wider = more capacity and more
+# overfitting risk; the rule of thumb here is width ∝ cardinality:
+#   menu_items    hundreds of dishes   → 8
+#   sub_category  tens                 → 4
+#   category      ~10                  → 4
+#   weekday       5–7                  → 2
+#   day_type      4, holiday_type 4, meal_day 2 → 2
+# A column missing from this dict falls back to 2 (see the model builder).
 EMB_DIMS = {
     "menu_items":   8,
     "sub_category": 4,
@@ -54,7 +69,13 @@ def cats_match(a, b):
     return a is not None and b is not None and norm(a) == norm(b)
 
 def floor005(v):
-    """Round down to the nearest 0.005 — the per-pax output granularity."""
+    """
+    Round DOWN to the nearest 0.005 kg — the per-pax output granularity.
+
+    Down, not nearest: the vendor bump in planner.py is what adds the safety
+    margin, so the client-facing PP stays conservative. 5 g is the finest
+    difference a serving spoon can hold; see the matching note in planner.py.
+    """
     return math.floor(v / 0.005) * 0.005
 
 def fmt_cols(df, cols):
@@ -275,6 +296,7 @@ def train_model(ck, path, logic, verbose=0):
     # integer indices consumed by the Keras Embedding layers.
     # An "other" token is always appended so the encoder has an OOV bucket for
     # values seen at prediction time that were absent from training data.
+    # encode_safe() routes anything unknown here instead of raising.
     encoders = {}
     for col in logic.encoder_columns:
         values = df[col].map(token).astype(str)
@@ -389,8 +411,15 @@ def train_model(ck, path, logic, verbose=0):
     #                  Dim per column is set by EMB_DIMS above.
     #
     # All streams are concatenated → Dense(64, relu) → Dropout(0.3) → Dense(32, relu) → Dense(1)
+    #
+    # TUNING (head size): 64 → 32 → 1 with 30% dropout. Deliberately small —
+    # the concatenated embedding is only ~30 wide and the datasets are a few
+    # thousand rows, so a wider head memorises the training menu instead of
+    # learning it. Dropout 0.3 is the main regulariser; loss is plain MSE on
+    # ideal_pp (kg/person), and Adam runs at its Keras default learning rate.
     vocab_size = len(encoders["menu_items"].classes_)
 
+    # vocab_size + 1 everywhere below: index `vocab_size` is the pad/OOV slot.
     inp_item = tf.keras.Input(shape=(1,),       name="item")
     inp_ctx  = tf.keras.Input(shape=(CTX_LEN,), name="ctx")   # co-menu context
     inputs   = [inp_item, inp_ctx]
